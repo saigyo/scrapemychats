@@ -1,0 +1,14 @@
+# your exported data — never commit this
+export/
+chats.csv
+categories.json
+
+# browser session (contains your ChatGPT login!)
+browser_profile/
+
+# logs
+run.log
+run_err.log
+
+__pycache__/
+*.pyc

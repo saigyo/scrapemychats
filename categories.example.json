@@ -1,0 +1,18 @@
+{
+  "_comment": "Copy this file to categories.json and edit. Groups (Personal/Work) contain subcategories, each with keywords. A chat is scored against every subcategory — keyword hits in the title count 4x, hits in the chat text count 1x — and filed under the best match. Chats matching nothing land in 'Unsorted'. Keys starting with _ are ignored.",
+  "Personal": {
+    "Home & DIY": ["boiler", "oven", "fridge", "plumbing", "paint", "repair", "washing machine", "leak"],
+    "Tech & Gadgets": ["windows", "iphone", "android", "router", "wifi", "printer", "laptop", "monitor", "backup"],
+    "Food & Cooking": ["recipe", "cook", "bake", "dinner", "sauce", "ingredients", "marinade"],
+    "Health & Family": ["doctor", "symptom", "baby", "school", "sleep", "exercise", "diet"],
+    "Travel": ["flight", "hotel", "trip", "itinerary", "visa", "airport", "holiday"],
+    "Shopping & Money": ["price", "value", "buy", "deal", "recommend", "compare", "warranty", "insurance"]
+  },
+  "Work": {
+    "Writing & Editing": ["draft", "rewrite", "edit", "summary", "proofread", "tone", "headline"],
+    "Research": ["research", "sources", "report", "analysis", "explain", "overview", "compare"],
+    "Marketing & Sales": ["campaign", "linkedin", "seo", "pitch", "client", "brand", "audience"],
+    "Finance & Admin": ["invoice", "tax", "contract", "payroll", "expenses", "budget", "accounting"],
+    "Code & Data": ["python", "javascript", "sql", "excel", "spreadsheet", "api", "script", "bug", "formula"]
+  }
+}
