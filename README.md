@@ -16,6 +16,9 @@ window on your computer using your own logged-in ChatGPT session. It never
 sees your password, and nothing is sent anywhere except to chatgpt.com
 itself.
 
+![Browsing the archive — categories, conversation list, and a full chat with attachments](docs/viewer-browse.png)
+*The offline viewer: categories on the left, your chats in the middle, the full conversation — tables, files, images — on the right. (Sample data shown.)*
+
 ## What you get
 
 ```
@@ -33,6 +36,9 @@ The viewer is a single self-contained HTML file: instant full-text search
 across all chats, optional Personal/Work categorisation, inline image
 thumbnails, keyboard navigation. No server, no internet, no dependencies —
 it works from a USB stick.
+
+![Searching the archive — instant full-text search with highlighted matches](docs/viewer-search.png)
+*Full-text search is instant and highlights matches in the results and inside the open chat. (Sample data shown.)*
 
 ## Quick start (if you're comfortable with a terminal)
 
