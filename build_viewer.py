@@ -353,7 +353,7 @@ const GI={}; META.groups.forEach((g,i)=>GI[g]=(i+1)%3);
 
 let state = {q:'', group:null, sub:null, sort:'new', sel:-1, shown:[]};
 
-function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 function stamp(c,label){
   if(!label) return '';
   return '<span class="stamp" data-gi="'+(GI[c.g]??1)+'">'+esc(label)+'</span>';
@@ -438,7 +438,7 @@ document.getElementById('sort').addEventListener('change',e=>{state.sort=e.targe
 function inline(s){
   s=s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g,(m,a,u)=>`<span class="asset">🖼 ${esc(a||'image')}</span>`);
   s=s.replace(/\[image: [^\]]+\]/g,'<span class="asset">🖼 image</span>');
-  s=s.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  s=s.replace(/\[([^\]]+)\]\((https?:[^)\s"'<>`]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
   s=s.replace(/`([^`]+)`/g,'<code>$1</code>');
   s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
   s=s.replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>');
@@ -505,7 +505,7 @@ function open(c){
       <h2>${esc(c.t)}</h2>
       <div class="meta">
         <span>${c.d||'undated'}</span><span>${c.n} messages</span>
-        ${c.u?`<a href="${c.u}" target="_blank" rel="noopener">original ↗</a>`:''}
+        ${/^https?:\/\/[^"'<>\s]+$/.test(c.u)?`<a href="${esc(c.u)}" target="_blank" rel="noopener">original ↗</a>`:''}
         <a href="${encodeURI(c.id)}/" target="_blank">folder ↗</a>
       </div>
     </div>
