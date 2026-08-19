@@ -105,7 +105,8 @@ type authWatcher struct {
 
 	mu       sync.Mutex
 	reqs     map[network.RequestID]map[string]string
-	sawMatch bool // a matching request was seen, with or without auth headers
+	extra    map[network.RequestID]map[string]string // ExtraInfo seen before its request event
+	sawMatch bool                                    // a matching request was seen, with or without auth headers
 
 	once sync.Once
 	ch   chan map[string]string
@@ -115,6 +116,7 @@ func newAuthWatcher(needle string) *authWatcher {
 	return &authWatcher{
 		needle: needle,
 		reqs:   make(map[network.RequestID]map[string]string),
+		extra:  make(map[network.RequestID]map[string]string),
 		ch:     make(chan map[string]string, 1),
 	}
 }
@@ -128,20 +130,29 @@ func (w *authWatcher) handle(ev any) {
 		w.mu.Lock()
 		defer w.mu.Unlock()
 		h := mergeHeaders(w.reqs[e.RequestID], headerMap(e.Request.Headers))
+		// CDP may deliver requestWillBeSentExtraInfo BEFORE requestWillBeSent;
+		// merge any wire headers buffered for this id (see the ExtraInfo case).
+		if buf, ok := w.extra[e.RequestID]; ok {
+			h = mergeHeaders(h, buf)
+			delete(w.extra, e.RequestID)
+		}
 		w.reqs[e.RequestID] = h
 		w.consider(h)
 	case *network.EventRequestWillBeSentExtraInfo:
-		// Wire headers for a request we already matched by URL; they are
-		// what actually went out, so they win over the provisional ones.
+		// The actual wire headers. If the URL-bearing request event already
+		// arrived, merge them straight in (they win over the provisional ones).
+		// Otherwise the protocol allows ExtraInfo to arrive first, so buffer
+		// them by request id and merge when the request event shows up —
+		// discarding them here could drop the only Authorization header.
 		w.mu.Lock()
 		defer w.mu.Unlock()
-		h, ok := w.reqs[e.RequestID]
-		if !ok {
+		if h, ok := w.reqs[e.RequestID]; ok {
+			h = mergeHeaders(h, headerMap(e.Headers))
+			w.reqs[e.RequestID] = h
+			w.consider(h)
 			return
 		}
-		h = mergeHeaders(h, headerMap(e.Headers))
-		w.reqs[e.RequestID] = h
-		w.consider(h)
+		w.extra[e.RequestID] = mergeHeaders(w.extra[e.RequestID], headerMap(e.Headers))
 	}
 }
 
@@ -257,6 +268,7 @@ type convWatcher struct {
 
 	mu      sync.Mutex
 	reqs    map[network.RequestID]*convRequest
+	extra   map[network.RequestID]map[string]string // ExtraInfo seen before its request event
 	matched network.RequestID
 	hasResp bool
 	status  int
@@ -276,6 +288,7 @@ func newConvWatcher(needle string) *convWatcher {
 		// Scoped to a single capture and only ever holding requests whose
 		// URL contains this conversation's id, so it cannot grow unbounded.
 		reqs:   make(map[network.RequestID]*convRequest),
+		extra:  make(map[network.RequestID]map[string]string),
 		respCh: make(chan struct{}),
 		doneCh: make(chan struct{}),
 		failCh: make(chan string, 1),
@@ -297,13 +310,24 @@ func (w *convWatcher) handle(ev any) {
 		}
 		r.method = e.Request.Method
 		r.headers = mergeHeaders(r.headers, headerMap(e.Request.Headers))
+		// CDP may deliver ExtraInfo before this event; merge any buffered wire
+		// headers for this id (see the ExtraInfo case).
+		if buf, ok := w.extra[e.RequestID]; ok {
+			r.headers = mergeHeaders(r.headers, buf)
+			delete(w.extra, e.RequestID)
+		}
 
 	case *network.EventRequestWillBeSentExtraInfo:
 		w.mu.Lock()
 		defer w.mu.Unlock()
 		if r := w.reqs[e.RequestID]; r != nil {
 			r.headers = mergeHeaders(r.headers, headerMap(e.Headers))
+			return
 		}
+		// The protocol allows ExtraInfo to arrive before its request event;
+		// buffer the wire headers by id rather than dropping them, and merge
+		// when the URL-bearing request event arrives.
+		w.extra[e.RequestID] = mergeHeaders(w.extra[e.RequestID], headerMap(e.Headers))
 
 	case *network.EventResponseReceived:
 		if e.Response == nil || !strings.Contains(e.Response.URL, w.needle) {

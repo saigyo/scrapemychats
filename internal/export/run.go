@@ -291,7 +291,12 @@ func Export(ctx context.Context, b Browser, cfg Config) (Summary, error) {
 		if err != nil {
 			return Summary{}, fmt.Errorf("export: encoding conversation.json: %w", err)
 		}
-		if err := os.WriteFile(filepath.Join(folder, "conversation.json"), convJSON, 0o644); err != nil {
+		// Write the resume marker atomically: resume only checks that
+		// conversation.json exists, so a partial write (disk full, crash, a
+		// forced second Ctrl+C) must never leave truncated JSON in place — that
+		// would make every later run skip the chat forever. Write to a temp
+		// file and rename, which is atomic on the same filesystem.
+		if err := writeFileAtomic(filepath.Join(folder, "conversation.json"), convJSON, 0o644); err != nil {
 			return Summary{}, fmt.Errorf("export: writing conversation.json: %w", err)
 		}
 
@@ -468,6 +473,45 @@ func finish(exported, skipped, failedN int, errorsPath string) Summary {
 		fsutil.Log(fmt.Sprintf("Failures listed in %s — re-run to retry just those chats.", errorsPath))
 	}
 	return Summary{Exported: exported, Skipped: skipped, Failed: failedN, ErrorsPath: errorsPath}
+}
+
+// writeFileAtomic writes data to path via a temp file in the same directory
+// and an atomic rename, so a reader (or a resume check) only ever sees the file
+// either absent or fully written — never a truncated partial. A failed write
+// leaves the temp file behind only if cleanup itself fails; the temp name is
+// dot-prefixed so it is ignored by the viewer's per-chat scan.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".conversation-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	cleanup = false // renamed into place; nothing to remove
+	return nil
 }
 
 // writeManifestRow writes and immediately flushes one manifest row, matching
