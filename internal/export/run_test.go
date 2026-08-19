@@ -600,3 +600,46 @@ func TestExportCancelledDuringDownloadsSkipsMarker(t *testing.T) {
 		t.Errorf("conversation.json marker must NOT exist after cancellation; stat err=%v", err)
 	}
 }
+
+// TestWriteFileAtomic verifies the marker write lands complete with the right
+// permissions and leaves no temp file behind.
+func TestWriteFileAtomic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "conversation.json")
+	want := []byte(`{"ok":true}`)
+	if err := writeFileAtomic(path, want, 0o644); err != nil {
+		t.Fatalf("writeFileAtomic: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("content = %q, want %q", got, want)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Errorf("perm = %v, want 0644", info.Mode().Perm())
+	}
+	// No leftover temp files in the directory.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "conversation.json" {
+			t.Errorf("unexpected leftover file %q", e.Name())
+		}
+	}
+	// Overwriting an existing marker works (atomic replace).
+	if err := writeFileAtomic(path, []byte(`{"ok":false}`), 0o644); err != nil {
+		t.Fatalf("overwrite: %v", err)
+	}
+	got, _ = os.ReadFile(path)
+	if string(got) != `{"ok":false}` {
+		t.Errorf("after overwrite content = %q", got)
+	}
+}

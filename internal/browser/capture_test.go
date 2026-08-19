@@ -183,6 +183,27 @@ func TestConvWatcherMatchesGetResponse(t *testing.T) {
 	}
 }
 
+func TestConvWatcherExtraInfoBeforeRequestEvent(t *testing.T) {
+	w := newConvWatcher("/backend-api/conversation/" + testCID)
+	// ExtraInfo (the wire Authorization) arrives before the URL-bearing request
+	// event, which the protocol permits — it must be buffered, not dropped.
+	w.handle(&network.EventRequestWillBeSentExtraInfo{
+		RequestID: "1",
+		Headers:   network.Headers{"authorization": "Bearer wire"},
+	})
+	w.handle(requestEvent("1", convURL(testCID), "GET",
+		network.Headers{"chatgpt-account-id": "acct-1"}))
+	w.handle(responseEvent("1", convURL(testCID), 200, nil))
+	if !responded(w) {
+		t.Fatal("did not signal after the matching response")
+	}
+	_, _, hdr := w.result()
+	got := AuthHeaders(hdr)
+	if got["Authorization"] != "Bearer wire" || got["chatgpt-account-id"] != "acct-1" {
+		t.Errorf("captured auth headers = %v, want the buffered wire Authorization merged in", got)
+	}
+}
+
 // export_chats.py:671-672 requires BOTH the URL match and method == GET; the
 // frontend POSTs to the same path while the chat is open.
 func TestConvWatcherIgnoresNonGet(t *testing.T) {
@@ -437,6 +458,35 @@ func TestAuthWatcherRequiresAuthorizationNotAccountIDAlone(t *testing.T) {
 		}
 	default:
 		t.Fatal("Authorization arriving via ExtraInfo did not complete the capture")
+	}
+}
+
+func TestAuthWatcherExtraInfoBeforeRequestEvent(t *testing.T) {
+	w := newAuthWatcher("/backend-api/conversations?")
+	// CDP delivers the wire headers (carrying the only Authorization) FIRST,
+	// before the URL-bearing request event. The ExtraInfo must be buffered, not
+	// dropped.
+	w.handle(&network.EventRequestWillBeSentExtraInfo{
+		RequestID: "1",
+		Headers:   network.Headers{"authorization": "Bearer wire"},
+	})
+	select {
+	case auth := <-w.ch:
+		t.Fatalf("completed before the request event matched a URL: %v", auth)
+	default:
+	}
+	// The request event arrives now; the buffered Authorization is merged in and
+	// the capture completes.
+	w.handle(requestEvent("1", BaseURL+"/backend-api/conversations?offset=0", "GET",
+		network.Headers{"chatgpt-account-id": "acct-1"}))
+	select {
+	case auth := <-w.ch:
+		want := map[string]string{"Authorization": "Bearer wire", "chatgpt-account-id": "acct-1"}
+		if !reflect.DeepEqual(auth, want) {
+			t.Errorf("auth = %v, want %v", auth, want)
+		}
+	default:
+		t.Fatal("buffered ExtraInfo was not merged when the request event arrived")
 	}
 }
 
