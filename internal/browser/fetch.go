@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -73,14 +74,23 @@ func parseFetchResult(raw []byte) (status int, body string, err error) {
 
 // FetchWithSession performs a GET from inside the page, so cookies, TLS
 // fingerprint and headers match the real session. Port of
-// fetch_with_session (export_chats.py:113-123).
+// fetch_with_session (export_chats.py:113-123). It is bounded only by the
+// session context; callers that need a per-call deadline use
+// fetchWithSessionCtx.
 func FetchWithSession(s *Session, apiURL string, headers map[string]string) (int, string, error) {
+	return fetchWithSessionCtx(s.ctx, apiURL, headers)
+}
+
+// fetchWithSessionCtx is FetchWithSession run against an explicit context, so a
+// caller can bound the in-page fetch with a deadline (e.g. the eviction
+// re-fetch in capture.go). ctx must derive from the session's chromedp context.
+func fetchWithSessionCtx(ctx context.Context, apiURL string, headers map[string]string) (int, string, error) {
 	expr, err := fetchExpr(apiURL, headers)
 	if err != nil {
 		return 0, "", err
 	}
 	var raw []byte
-	if err := chromedp.Run(s.ctx, chromedp.Evaluate(expr, &raw, awaitPromise)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.Evaluate(expr, &raw, awaitPromise)); err != nil {
 		return 0, "", fmt.Errorf("browser: fetching %s in page: %w", apiURL, err)
 	}
 	return parseFetchResult(raw)
