@@ -125,6 +125,20 @@ func (c *fakeFilesClient) GetBinaryInPage(u string, h map[string]string) (int, [
 	return 200, []byte("x"), nil
 }
 
+// cancelDownloadClient simulates Ctrl+C arriving while a chat's files are
+// downloading: its metadata Fetch cancels the context (then returns an empty
+// download_url so the download records a failure and skips its trailing sleep,
+// keeping the test instant). It embeds fakeFilesClient for the other methods.
+type cancelDownloadClient struct {
+	fakeFilesClient
+	cancel context.CancelFunc
+}
+
+func (c *cancelDownloadClient) Fetch(u string, h map[string]string) (int, string, error) {
+	c.cancel()
+	return 200, `{"download_url": ""}`, nil
+}
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
@@ -550,5 +564,39 @@ func TestExportInterrupted(t *testing.T) {
 	}
 	if len(manifestRows) != 2 { // header + Chat00
 		t.Errorf("manifest has %d rows, want 2 (header + one ok); rows=%v", len(manifestRows), manifestRows)
+	}
+}
+
+// TestExportCancelledDuringDownloadsSkipsMarker verifies that a Ctrl+C landing
+// while a chat's files download does NOT leave a conversation.json completion
+// marker — otherwise a normal resume would skip the chat with files missing.
+func TestExportCancelledDuringDownloadsSkipsMarker(t *testing.T) {
+	recordSleeps(t) // pacing sleeps become instant and cancellation-aware
+	outDir := t.TempDir()
+	csvPath := filepath.Join(outDir, "chats.csv")
+	cid := "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+	writeCSV(t, csvPath, [][2]string{{browser.BaseURL + "/c/" + cid, "Echo"}})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	fb := &fakeBrowser{
+		auth:   map[string]string{"Authorization": "Bearer x"},
+		client: &cancelDownloadClient{cancel: cancel},
+		captures: map[string]*scriptedCapture{
+			cid: {results: []captureResult{{data: smallConv(cid, "hi echo", "file-ECHO", "echo.txt"), status: 200}}},
+		},
+	}
+
+	if _, err := Export(ctx, fb, Config{CSVPath: csvPath, OutDir: outDir}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Export err = %v, want context.Canceled", err)
+	}
+
+	folder := filepath.Join(outDir, "001_Echo_"+cid[:8])
+	// conversation.md is written before downloads, so it exists...
+	if _, err := os.Stat(filepath.Join(folder, "conversation.md")); err != nil {
+		t.Errorf("conversation.md should have been written before the download: %v", err)
+	}
+	// ...but the completion marker must NOT be written on cancellation.
+	if _, err := os.Stat(filepath.Join(folder, "conversation.json")); !os.IsNotExist(err) {
+		t.Errorf("conversation.json marker must NOT exist after cancellation; stat err=%v", err)
 	}
 }
