@@ -87,6 +87,11 @@ notarize:
         issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
         key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
         key: "{{ .Env.MACOS_NOTARY_KEY }}"
+        # Fail closed: wait for Apple's verdict, and if a submission is still
+        # pending at the cap the timeout is an error that fails the release and
+        # publishes nothing — a released darwin binary is always notarized.
+        # (Verified on cc-what-have-i-done; see docs/release-signing.md.) Raise
+        # this if Apple's queue is consistently slow.
         wait: true
         timeout: 20m
 

@@ -235,7 +235,9 @@ func Export(ctx context.Context, b Browser, cfg Config) (Summary, error) {
 		// that returned {} is recorded as failed just like a missing capture.
 		if len(data) == 0 {
 			failedN++
-			writeManifestRow(manifest, []string{url, title, "", "failed", "0", "0", "0"})
+			if err := writeManifestRow(manifest, []string{url, title, "", "failed", "0", "0", "0"}); err != nil {
+				return Summary{}, fmt.Errorf("export: writing manifest row: %w", err)
+			}
 			continue
 		}
 
@@ -265,6 +267,16 @@ func Export(ctx context.Context, b Browser, cfg Config) (Summary, error) {
 			fOK, fFail = ok+sOK, fail+sFail
 		}
 
+		// Cancelled (SIGINT) during the downloads? The download helpers turn a
+		// cancelled in-page fetch into failed-file counts rather than an error,
+		// so bail out here BEFORE writing the conversation.json marker — marking
+		// the chat complete now would make a normal resume skip it with files
+		// still missing. The next run redoes this chat; files already on disk
+		// are skipped via AlreadyHave.
+		if err := ctx.Err(); err != nil {
+			return summaryNow(), err
+		}
+
 		lastAuth = auth
 		nMsgs := len(convmd.OrderedMessages(data))
 
@@ -283,8 +295,15 @@ func Export(ctx context.Context, b Browser, cfg Config) (Summary, error) {
 			return Summary{}, fmt.Errorf("export: writing conversation.json: %w", err)
 		}
 
-		writeManifestRow(manifest, []string{url, title, filepath.Base(folder), "ok",
-			strconv.Itoa(nMsgs), strconv.Itoa(fOK), strconv.Itoa(fFail)})
+		// conversation.json (the resume marker) is already on disk, so a failure
+		// to record the manifest row means the row is missing for a chat that
+		// will be skipped on resume. That's an inconsistency we surface rather
+		// than swallow: abort with the I/O error (typically disk-full) instead
+		// of reporting a success that didn't happen.
+		if err := writeManifestRow(manifest, []string{url, title, filepath.Base(folder), "ok",
+			strconv.Itoa(nMsgs), strconv.Itoa(fOK), strconv.Itoa(fFail)}); err != nil {
+			return Summary{}, fmt.Errorf("export: writing manifest row: %w", err)
+		}
 		exported++
 
 		// Pacing after each exported chat (export_chats.py:834-841). rlHits (the
@@ -453,10 +472,14 @@ func finish(exported, skipped, failedN int, errorsPath string) Summary {
 
 // writeManifestRow writes and immediately flushes one manifest row, matching
 // Python's per-row mf.flush() so an interrupted run leaves a consistent
-// manifest on disk.
-func writeManifestRow(w *csv.Writer, row []string) {
-	_ = w.Write(row)
+// manifest on disk. It returns any write/flush error (e.g. disk full) so the
+// caller can stop rather than report a success that never reached disk.
+func writeManifestRow(w *csv.Writer, row []string) error {
+	if err := w.Write(row); err != nil {
+		return err
+	}
 	w.Flush()
+	return w.Error()
 }
 
 // marshalConversationJSON encodes the conversation as indented JSON for the

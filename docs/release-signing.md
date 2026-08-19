@@ -115,11 +115,12 @@ keys. Only the separate `Release` step receives the secrets. Updates:
   **per submission**; the two darwin binaries are processed sequentially, so
   the stage can take up to ~40 minutes in the worst case. Apple typically
   takes 1–5 minutes each.
-- A submission Apple **rejects** (or marks invalid) fails the release. A
-  submission still pending when the 20-minute cap expires does **not**:
-  goreleaser logs `notarize timeout` and continues, so such a release can
-  ship before notarization completed. If Apple accepts afterwards, the
-  online Gatekeeper check succeeds anyway (nothing is stapled); if Apple
-  rejects afterwards, the binary stays unnotarized. After any release whose
-  notarize stage logged a timeout, run the verification commands above and
-  re-cut the release if they fail.
+- **The release fails closed.** A submission Apple **rejects** (or marks
+  invalid) fails the release, and a submission still **pending** when the
+  20-minute cap expires **also fails the release** — goreleaser treats the
+  timeout as an error and publishes **nothing** (verified on the
+  cc-what-have-i-done project). So a released darwin binary is always a
+  notarized one; there is no path that ships an un-notarized binary while the
+  README promises notarized builds. If a release fails on a notarize timeout,
+  re-run it (push the tag again, or re-run the workflow) once Apple's queue
+  has drained; raise `timeout` if Apple is consistently slow.
