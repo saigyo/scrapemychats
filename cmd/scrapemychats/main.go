@@ -27,6 +27,11 @@ import (
 	"github.com/saigyo/scrapemychats/internal/viewer"
 )
 
+// version is the build version, stamped at release time via
+// -ldflags "-X main.version=..." (see .goreleaser.yaml). It stays "dev" for
+// plain `go build` and local runs.
+var version = "dev"
+
 // options holds the parsed command line. Path flags default to "" and are
 // resolved against the base directory after it is known (see resolvePath), so
 // the base-relative defaults can be computed from os.Executable() at runtime.
@@ -42,6 +47,7 @@ type options struct {
 	viewerOnly  bool
 	viewerTitle string
 	noPause     bool
+	showVersion bool
 }
 
 // registerFlags declares every flag on fs and returns the options they write
@@ -60,6 +66,7 @@ func registerFlags(fs *flag.FlagSet) *options {
 	fs.BoolVar(&o.viewerOnly, "viewer-only", false, "only (re)build the HTML viewer from an existing export, then exit")
 	fs.StringVar(&o.viewerTitle, "viewer-title", "The Chat Archive", "title shown in the viewer")
 	fs.BoolVar(&o.noPause, "no-pause", false, "don't wait for Enter before closing (also auto-skipped when not a terminal)")
+	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
 	return o
 }
 
@@ -75,6 +82,12 @@ func run(args []string) int {
 	o := registerFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+
+	// --version: print and exit before anything else (no pause, no browser).
+	if o.showVersion {
+		fmt.Println("scrapemychats " + version)
+		return 0
 	}
 
 	// pause is deferred first so it runs LAST (after the browser is closed and

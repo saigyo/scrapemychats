@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Reads `go 1.26` from go.mod, so the toolchain always matches the
+          # module requirement (chromedp/cdproto needs >= 1.26). setup-go also
+          # caches the module and build cache by default.
+          go-version-file: go.mod
+
+      # gofmt is deterministic across platforms; run it once on Linux only.
+      - name: gofmt
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      # The gated live-browser test (internal/browser/live_test.go) self-skips
+      # unless SCRAPEMYCHATS_LIVE_BROWSER is set, so it never runs in CI (no
+      # display, no ChatGPT account).
+      - name: go test
+        run: go test ./... -race

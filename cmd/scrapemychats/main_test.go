@@ -96,8 +96,27 @@ func TestFlagDefaults(t *testing.T) {
 	if o.viewerTitle != "The Chat Archive" {
 		t.Errorf("viewer-title default = %q, want %q", o.viewerTitle, "The Chat Archive")
 	}
-	if o.rediscover || o.fixFiles || o.viewerOnly || o.noPause {
+	if o.rediscover || o.fixFiles || o.viewerOnly || o.noPause || o.showVersion {
 		t.Errorf("bool flags should default false: %+v", o)
+	}
+}
+
+func TestVersionFlag(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	o := registerFlags(fs)
+	if err := fs.Parse([]string{"--version"}); err != nil {
+		t.Fatal(err)
+	}
+	if !o.showVersion {
+		t.Error("--version should set showVersion")
+	}
+	// run(["--version"]) must exit 0 without touching the browser.
+	if code := run([]string{"--version"}); code != 0 {
+		t.Errorf("run(--version) = %d, want 0", code)
+	}
+	// The default build stamp is "dev"; a release overrides it via ldflags.
+	if version == "" {
+		t.Error("version var should never be empty")
 	}
 }
 
