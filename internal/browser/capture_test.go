@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
@@ -8,6 +9,35 @@ import (
 
 	"github.com/chromedp/cdproto/network"
 )
+
+func TestClassifyRefetchErr(t *testing.T) {
+	// A live session cancellation (Ctrl+C) propagates verbatim.
+	if got := classifyRefetchErr("cid", context.Canceled, nil, nil); !errors.Is(got, context.Canceled) {
+		t.Errorf("session-cancelled: got %v, want context.Canceled", got)
+	}
+
+	// Our NavTimeout deadline must become the retriable ErrCaptureTimeout and
+	// must NOT satisfy errors.Is(context.DeadlineExceeded) — otherwise the
+	// export loop, which checks DeadlineExceeded first, would abort the whole
+	// run instead of retrying this one chat.
+	got := classifyRefetchErr("cid", nil, context.DeadlineExceeded, context.DeadlineExceeded)
+	if !errors.Is(got, ErrCaptureTimeout) {
+		t.Errorf("timeout: got %v, want wrapped ErrCaptureTimeout", got)
+	}
+	if errors.Is(got, context.DeadlineExceeded) {
+		t.Errorf("timeout error must NOT wrap context.DeadlineExceeded (loop would treat it as cancellation): %v", got)
+	}
+
+	// Any other failure is wrapped verbatim and is neither sentinel.
+	other := errors.New("boom")
+	got = classifyRefetchErr("cid", nil, nil, other)
+	if !errors.Is(got, other) {
+		t.Errorf("other error should wrap the cause: %v", got)
+	}
+	if errors.Is(got, ErrCaptureTimeout) || errors.Is(got, context.DeadlineExceeded) {
+		t.Errorf("other error must not look like a timeout: %v", got)
+	}
+}
 
 func TestAuthHeaders(t *testing.T) {
 	tests := []struct {

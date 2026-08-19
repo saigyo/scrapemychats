@@ -433,12 +433,33 @@ func conversationBody(s *Session, w *convWatcher, reqID network.RequestID, cid s
 		return nil, 0, s.ctx.Err()
 	}
 
-	status, body, err := FetchWithSession(s, BaseURL+"/backend-api/conversation/"+cid, auth)
+	// Bound the re-fetch: this path is reached only after a wait already
+	// failed, so a stalled in-page fetch must not hang the export until Ctrl+C
+	// (reported by Copilot). NavTimeout matches the main capture wait.
+	fetchCtx, cancel := context.WithTimeout(s.ctx, NavTimeout)
+	defer cancel()
+	status, body, err := fetchWithSessionCtx(fetchCtx, BaseURL+"/backend-api/conversation/"+cid, auth)
 	if err != nil {
-		return nil, 0, fmt.Errorf("browser: re-fetching conversation %s after the "+
-			"captured body was unavailable: %w", cid, err)
+		return nil, 0, classifyRefetchErr(cid, s.ctx.Err(), fetchCtx.Err(), err)
 	}
 	return []byte(body), status, nil
+}
+
+// classifyRefetchErr maps a failed bounded re-fetch to the error the export
+// loop expects. A real session cancellation (Ctrl+C) propagates verbatim. Our
+// own NavTimeout deadline becomes the retriable ErrCaptureTimeout — crucially
+// NOT a bare context.DeadlineExceeded, which captureWithRetry treats as
+// cancellation and would abort the whole export on. Anything else is wrapped
+// verbatim.
+func classifyRefetchErr(cid string, sessErr, fetchCtxErr, rawErr error) error {
+	if sessErr != nil {
+		return sessErr
+	}
+	if errors.Is(fetchCtxErr, context.DeadlineExceeded) {
+		return fmt.Errorf("browser: re-fetching conversation %s timed out: %w", cid, ErrCaptureTimeout)
+	}
+	return fmt.Errorf("browser: re-fetching conversation %s after the "+
+		"captured body was unavailable: %w", cid, rawErr)
 }
 
 // responseBody asks Chrome for the body of an already-received response.
