@@ -17,6 +17,28 @@ func flagValue(flags []flagSpec, name string) (any, bool) {
 
 // The launch flags are safety-critical: a regression here can get the user's
 // account flagged. These assertions are the contract.
+func TestIsBenignChromedpNoise(t *testing.T) {
+	drop := []string{
+		"unhandled node event *dom.EventTopLayerElementsUpdated",
+		"unhandled page event *page.EventSomething",
+	}
+	for _, m := range drop {
+		if !isBenignChromedpNoise(m) {
+			t.Errorf("expected %q to be dropped as benign noise", m)
+		}
+	}
+	keep := []string{
+		"could not unmarshal response",
+		"websocket read error: connection reset",
+		"",
+	}
+	for _, m := range keep {
+		if isBenignChromedpNoise(m) {
+			t.Errorf("expected %q to be forwarded, not dropped", m)
+		}
+	}
+}
+
 func TestAllocatorFlagsRequired(t *testing.T) {
 	flags := allocatorFlags("/tmp/profile")
 
