@@ -1,6 +1,9 @@
 package fsutil
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -258,5 +261,82 @@ func assertRecordsEqual(t *testing.T, got, want [][]string) {
 				t.Errorf("record %d field %d: got %q, want %q", i, j, got[i][j], want[i][j])
 			}
 		}
+	}
+}
+
+func TestEscapeReservedName(t *testing.T) {
+	// Pure, deterministic on every platform: reserved stems get an underscore,
+	// everything else is unchanged.
+	cases := map[string]string{
+		"CON":         "_CON",
+		"con":         "_con",     // case-insensitive match, original case kept
+		"NUL.txt":     "_NUL.txt", // reserved stem with an extension
+		"COM1":        "_COM1",
+		"LPT9.pdf":    "_LPT9.pdf",
+		"AUX":         "_AUX",
+		"report.pdf":  "report.pdf", // normal name unchanged
+		"CONSOLE":     "CONSOLE",    // stem not exactly reserved
+		"COM0":        "COM0",       // only COM1..9 are reserved
+		"my.CON":      "my.CON",     // reserved word only in the extension
+		"data.tar.gz": "data.tar.gz",
+	}
+	for in, want := range cases {
+		if got := escapeReservedName(in); got != want {
+			t.Errorf("escapeReservedName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSanitizeNReservedNameIsCreatable(t *testing.T) {
+	// The reserved-name escaping only kicks in on Windows (so macOS/Linux stay
+	// byte-identical to the Python tool); either way the sanitized name must be
+	// a filename that can actually be created, which the write proves.
+	dir := t.TempDir()
+	got := SanitizeN("CON.txt", 100)
+	if runtime.GOOS == "windows" {
+		if got != "_CON.txt" {
+			t.Errorf("SanitizeN(CON.txt) on windows = %q, want _CON.txt", got)
+		}
+	} else if got != "CON.txt" {
+		t.Errorf("SanitizeN(CON.txt) off windows = %q, want CON.txt (Python parity)", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, got), []byte("x"), 0o644); err != nil {
+		t.Errorf("sanitized reserved name %q is not creatable: %v", got, err)
+	}
+}
+
+func TestWriteFileAtomic(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "conversation.json")
+	want := []byte(`{"ok":true}`)
+	if err := WriteFileAtomic(path, want, 0o644); err != nil {
+		t.Fatalf("WriteFileAtomic: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("content = %q, want %q", got, want)
+	}
+	if runtime.GOOS != "windows" { // Windows reports 0666 regardless of chmod
+		if info, _ := os.Stat(path); info.Mode().Perm() != 0o644 {
+			t.Errorf("perm = %v, want 0644", info.Mode().Perm())
+		}
+	}
+	// No leftover temp files.
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if e.Name() != "conversation.json" {
+			t.Errorf("unexpected leftover file %q", e.Name())
+		}
+	}
+	// Atomic overwrite of an existing file works on all platforms.
+	if err := WriteFileAtomic(path, []byte(`{"ok":false}`), 0o644); err != nil {
+		t.Fatalf("overwrite: %v", err)
+	}
+	got, _ = os.ReadFile(path)
+	if string(got) != `{"ok":false}` {
+		t.Errorf("after overwrite content = %q", got)
 	}
 }

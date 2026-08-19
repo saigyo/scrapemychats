@@ -13,7 +13,10 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -88,7 +91,80 @@ func SanitizeN(name string, maxLen int) string {
 	if name == "" {
 		return "untitled"
 	}
+	// On Windows, a basename whose stem is a reserved device name (CON, NUL,
+	// COM1…) can't be created at all, so an attachment named e.g. "CON.txt"
+	// would fail the export. Escape it there only, so macOS/Linux output stays
+	// byte-identical to the Python tool (which doesn't handle these either).
+	if runtime.GOOS == "windows" {
+		name = escapeReservedName(name)
+	}
 	return name
+}
+
+// reservedWindowsNames are the device names Windows refuses to use as a file
+// basename, with or without an extension (case-insensitive).
+var reservedWindowsNames = map[string]bool{
+	"CON": true, "PRN": true, "AUX": true, "NUL": true,
+	"COM1": true, "COM2": true, "COM3": true, "COM4": true, "COM5": true,
+	"COM6": true, "COM7": true, "COM8": true, "COM9": true,
+	"LPT1": true, "LPT2": true, "LPT3": true, "LPT4": true, "LPT5": true,
+	"LPT6": true, "LPT7": true, "LPT8": true, "LPT9": true,
+}
+
+// escapeReservedName prefixes an underscore when name's stem (the part before
+// the first dot) is a Windows reserved device name, making it creatable on
+// Windows. It is a no-op for every non-reserved name, so ordinary
+// archive-compatible names are unchanged.
+func escapeReservedName(name string) string {
+	stem := name
+	if i := strings.IndexByte(name, '.'); i >= 0 {
+		stem = name[:i]
+	}
+	if reservedWindowsNames[strings.ToUpper(stem)] {
+		return "_" + name
+	}
+	return name
+}
+
+// WriteFileAtomic writes data to path via a temp file in the same directory
+// and an atomic rename, so a reader — or a resume/existence check — only ever
+// sees the file absent or fully written, never truncated. Used for every file
+// whose partial presence would be mistaken for a complete one: the resume
+// marker, the chat list, and downloaded attachments. The temp name is
+// dot-prefixed so a rare leftover (only if cleanup itself fails) is skipped by
+// the viewer's per-chat file scan.
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".smc-tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	cleanup = false // renamed into place; nothing to remove
+	return nil
 }
 
 // bomBytes is the UTF-8 encoding of U+FEFF, the byte order mark.

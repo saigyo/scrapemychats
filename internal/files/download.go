@@ -166,7 +166,7 @@ func SaveDownloadURL(c Client, dlURL, filesDir, name, label string, err func(str
 	if fileExists(target) {
 		target = filepath.Join(filesDir, fmt.Sprintf("%d_%s", collisionSuffix(dlURL), sanitized))
 	}
-	if e := os.WriteFile(target, data, 0o644); e != nil {
+	if e := fsutil.WriteFileAtomic(target, data, 0o644); e != nil {
 		err(fmt.Sprintf("%s: %v", label, e))
 		return false
 	}
@@ -497,7 +497,7 @@ func downloadOneFile(c Client, ref FileRef, filesDir string, auth map[string]str
 	if fileExists(target) {
 		target = filepath.Join(filesDir, idTail(fid)+"_"+fname)
 	}
-	if e := os.WriteFile(target, data, 0o644); e != nil {
+	if e := fsutil.WriteFileAtomic(target, data, 0o644); e != nil {
 		err(fmt.Sprintf("file %s (%s): %v", fid, name, e))
 		return false, true
 	}
