@@ -131,8 +131,8 @@ func run(args []string) int {
 	// profile and the output folder.
 	release, ok := acquireLock(base)
 	if !ok {
-		fmt.Println("Another scrapemychats run looks active (lock file present).")
-		fmt.Println("If you're sure nothing else is running, delete " + lockPath(base) + " and try again.")
+		fmt.Println("Another scrapemychats run appears to be active in " + base + ".")
+		fmt.Println("Close it (or wait for it to finish) and try again — the lock frees automatically when that run exits.")
 		return 1
 	}
 	defer release()
