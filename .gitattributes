@@ -1,0 +1,10 @@
+# Normalize all text files to LF in the working tree on every platform.
+# Without this, Windows CI checks out golden fixtures (internal/*/testdata) and
+# the embedded viewer template with CRLF via core.autocrlf, breaking the
+# byte-exact comparisons in internal/convmd and internal/viewer. LF also keeps
+# install.sh runnable.
+* text=auto eol=lf
+
+# Binary assets git must never touch as text.
+*.png binary
+*.zip binary

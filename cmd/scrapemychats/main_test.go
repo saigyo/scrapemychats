@@ -9,11 +9,12 @@ import (
 )
 
 func TestResolveBaseDirWritable(t *testing.T) {
-	exe := "/opt/app/scrapemychats"
+	exe := filepath.Join("/opt", "app", "scrapemychats")
 	base, note := resolveBaseDir(exe, func(string) bool { return true }, "/home/u")
 	// EvalSymlinks fails on this non-existent path, so dir stays filepath.Dir(exe).
-	if base != "/opt/app" {
-		t.Errorf("base = %q, want /opt/app", base)
+	want := filepath.Dir(exe)
+	if base != want {
+		t.Errorf("base = %q, want %q", base, want)
 	}
 	if note != "" {
 		t.Errorf("note = %q, want empty on the writable path", note)
@@ -51,8 +52,9 @@ func TestResolvePath(t *testing.T) {
 	cases := []struct {
 		flagVal, name, want string
 	}{
-		{"", "chats.csv", "/data/chats.csv"},        // default → base-relative
-		{"/abs/my.csv", "chats.csv", "/abs/my.csv"}, // absolute honored
+		// default → base-relative (filepath.Join uses the OS separator).
+		{"", "chats.csv", filepath.Join(base, "chats.csv")},
+		{"/abs/my.csv", "chats.csv", "/abs/my.csv"}, // absolute honored verbatim
 		{"rel/my.csv", "chats.csv", "rel/my.csv"},   // relative honored as-is
 	}
 	for _, c := range cases {

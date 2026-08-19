@@ -14,11 +14,13 @@ permissions:
 #
 #   * Every third-party action is pinned to an immutable commit SHA (a tag like
 #     @v7 is mutable and could be repointed at malicious code).
-#   * GoReleaser is installed by a fail-CLOSED download: we fetch the exact
-#     release tarball and verify its SHA-256 before running it. We deliberately
-#     do NOT use goreleaser/goreleaser-action, whose checksum verification is
-#     fail-OPEN (it proceeds if verification can't be done) — unacceptable for a
-#     secret-holding job.
+#   * Both the Go toolchain and GoReleaser are installed by fail-CLOSED
+#     downloads: we fetch the exact tarball and verify its SHA-256 before it
+#     runs. We deliberately do NOT use actions/setup-go (resolves from a
+#     mutable version manifest with no digest pin) or goreleaser-action (its
+#     checksum verification is fail-OPEN — it proceeds if verification can't be
+#     done) — both unacceptable for a secret-holding job. GOTOOLCHAIN=local
+#     also stops Go from transparently fetching a different toolchain at build.
 #
 # Signing runs on ubuntu-latest because GoReleaser's quill notarize backend is
 # pure Go and keychain-free (no macOS runner needed).
@@ -29,6 +31,16 @@ permissions:
 env:
   GORELEASER_VERSION: v2.17.1
   GORELEASER_SHA256: a99bbc7ae0d8d897b07c4c497a9b62f222558804715ef219d1af05a7e417bc80
+  # Go toolchain: installed below with the same fail-closed digest check
+  # (setup-go resolves from a mutable manifest without one, and goreleaser
+  # launches the compiler inside the secret-bearing Release step). Must
+  # satisfy go.mod's `go` directive; GOTOOLCHAIN=local forbids Go from
+  # transparently downloading a different toolchain. Update both values
+  # together from https://go.dev/dl/ (digest published there; cross-check
+  # by hashing an independently downloaded tarball).
+  GO_VERSION: 1.26.7
+  GO_SHA256: ffb5f8de10c62550dfddab66b36b57030721e0a44a3218e9e1181d7b59f121ca
+  GOTOOLCHAIN: local
 
 jobs:
   goreleaser:
@@ -46,10 +58,13 @@ jobs:
           # Full history so GoReleaser can build the changelog from tags.
           fetch-depth: 0
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          check-latest: true
+      - name: Install Go (digest-verified, fail-closed)
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/go.tgz" \
+            "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
+          echo "${GO_SHA256}  $RUNNER_TEMP/go.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/go.tgz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/go/bin" >> "$GITHUB_PATH"
 
       - name: Install goreleaser (digest-verified, fail-closed)
         run: |
