@@ -1,0 +1,18 @@
+{
+  "count": 3,
+  "from": "2024-01-05",
+  "to": "2024-03-15",
+  "title": "Test Archive",
+  "groups": [
+    "Work",
+    "Personal"
+  ],
+  "subs": {
+    "Work": [
+      "Code & Data"
+    ],
+    "Personal": [
+      "Food & Cooking"
+    ]
+  }
+}

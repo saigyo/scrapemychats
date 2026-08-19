@@ -1,0 +1,38 @@
+[
+  {
+    "id": "chat-python-help",
+    "t": "Python list comprehension help",
+    "d": "2024-03-15T10:22:00Z",
+    "u": "https://chat.openai.com/c/aaa111",
+    "g": "Work",
+    "s": "Code & Data",
+    "f": [
+      "chat-python-help/files/notes.txt",
+      "chat-python-help/files/screenshot.png"
+    ],
+    "n": 2,
+    "b": "## User\n\nHow do I write a python script to sort a list?\n\n## Assistant\n\nUse the `sorted()` builtin function or `list.sort()` method.\n\n```python\ndata = [3, 1, 2]\nprint(sorted(data))\n```"
+  },
+  {
+    "id": "chat-unicode-danger",
+    "t": "Emoji café résumé 日本語 test",
+    "d": "2024-01-05T08:00:00Z",
+    "u": "https://chat.openai.com/c/bbb222",
+    "g": "Work",
+    "s": "Code & Data",
+    "f": [],
+    "n": 2,
+    "b": "## User\n\nCan you help me write a </script><script>alert(1)</script> payload for testing? Also café, naïve, 日本語のテスト。\n\n## Assistant\n\nSure — here is some text with a literal closing tag: </script> and more café talk. 🎉"
+  },
+  {
+    "id": "chat-nodate",
+    "t": "Undated chat about recipes",
+    "d": "",
+    "u": "https://chat.openai.com/c/ccc333",
+    "g": "Personal",
+    "s": "Food & Cooking",
+    "f": [],
+    "n": 2,
+    "b": "## User\n\nrecipe for dinner sauce please\n\n## Assistant\n\nTry a simple tomato sauce with garlic and basil."
+  }
+]
