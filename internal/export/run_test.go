@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -621,7 +622,9 @@ func TestWriteFileAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o644 {
+	// Windows doesn't honor Unix permission bits (files report 0666), so only
+	// assert the exact mode where it's meaningful.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o644 {
 		t.Errorf("perm = %v, want 0644", info.Mode().Perm())
 	}
 	// No leftover temp files in the directory.
