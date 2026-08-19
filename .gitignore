@@ -7,6 +7,9 @@ manifest.csv
 # browser session (contains your ChatGPT login!)
 browser_profile/
 
+# single-run lock file
+.scrapemychats.lock
+
 # logs
 *.log
 

@@ -18,8 +18,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"time"
 
+	"github.com/gofrs/flock"
 	"golang.org/x/term"
 
 	"github.com/saigyo/scrapemychats/internal/browser"
@@ -270,34 +270,25 @@ func homeDir() string {
 	return "."
 }
 
-// lockStaleAfter is how old a lock file may be before a new run treats it as
-// stale and takes it over. It only needs to comfortably exceed a normal run
-// (large archives take a few hours), while still recovering from a crash within
-// a day.
-const lockStaleAfter = 24 * time.Hour
-
 func lockPath(base string) string { return filepath.Join(base, ".scrapemychats.lock") }
 
-// acquireLock creates base/.scrapemychats.lock exclusively so a second run
-// can't start. It returns a release func and whether the lock was taken. A
-// stale lock (older than lockStaleAfter, e.g. left by a crash) is taken over
-// with a warning rather than blocking the user forever.
+// acquireLock takes an OS advisory lock on base/.scrapemychats.lock so a
+// second concurrent run can't fight over the browser profile and output
+// folder. It returns a release func and whether the lock was acquired.
+//
+// The lock is held by the OS for the life of the process and released
+// automatically when the process exits — including on a crash — so there is no
+// stale lock file to reason about and no age heuristic that could either wrongly
+// hijack a run legitimately lasting many hours or let two processes both take
+// over the same file. TryLock is atomic, so exactly one of two racing runs
+// wins.
 func acquireLock(base string) (release func(), ok bool) {
-	path := lockPath(base)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-	if err != nil {
-		if info, statErr := os.Stat(path); statErr == nil && time.Since(info.ModTime()) > lockStaleAfter {
-			fmt.Println("Found a stale lock file from a previous run; taking it over.")
-			if f, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644); err != nil {
-				return func() {}, false
-			}
-		} else {
-			return func() {}, false
-		}
+	fl := flock.New(lockPath(base))
+	locked, err := fl.TryLock()
+	if err != nil || !locked {
+		return func() {}, false
 	}
-	fmt.Fprintf(f, "pid %d at %s\n", os.Getpid(), time.Now().Format(time.RFC3339))
-	f.Close()
-	return func() { os.Remove(path) }, true
+	return func() { _ = fl.Unlock() }, true
 }
 
 // shouldPause decides whether to wait for Enter before exiting: only when the
