@@ -1,0 +1,22 @@
+[
+  {
+    "message_id": "m-a2",
+    "path": "/mnt/data/results.csv"
+  },
+  {
+    "message_id": "m-a2",
+    "path": "/mnt/data/chart.png"
+  },
+  {
+    "message_id": "m-m3",
+    "path": "/mnt/data/na"
+  },
+  {
+    "message_id": "m-m3",
+    "path": "/mnt/data/my"
+  },
+  {
+    "message_id": "m-b4",
+    "path": "/mnt/data/summary.md"
+  }
+]

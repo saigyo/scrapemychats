@@ -1,0 +1,89 @@
+{
+  "title": "What is in this picture?",
+  "conversation_id": "33333333-3333-4333-8333-333333333333",
+  "create_time": 1702000000.0,
+  "update_time": 1702000060.25,
+  "current_node": "n3",
+  "mapping": {
+    "root": {"id": "root", "message": null, "parent": null, "children": ["n1"]},
+    "n1": {
+      "id": "n1",
+      "message": {
+        "id": "m-user-1",
+        "author": {"role": "user"},
+        "content": {
+          "content_type": "multimodal_text",
+          "parts": [
+            {
+              "content_type": "image_asset_pointer",
+              "asset_pointer": "file-service://file-ImgAaa111",
+              "size_bytes": 51234,
+              "width": 800,
+              "height": 600
+            },
+            {
+              "content_type": "audio_transcription",
+              "text": "and this is what I said out loud",
+              "direction": "in"
+            },
+            {
+              "content_type": "real_time_user_audio_video_asset_pointer",
+              "frames_asset_pointers": [],
+              "video_container_asset_pointer": null
+            },
+            {"unexpected_shape": true},
+            "What is in this picture?"
+          ]
+        },
+        "recipient": "all",
+        "metadata": {
+          "attachments": [
+            {"id": "file-AttBbb222", "name": "receipt.pdf", "size": 1024, "mime_type": "application/pdf"},
+            {"id": "file-AttCcc333", "name": ""},
+            {"id": "file-ImgAaa111", "name": "photo.jpg", "width": 800, "height": 600}
+          ]
+        }
+      },
+      "parent": "root",
+      "children": ["n2"]
+    },
+    "n2": {
+      "id": "n2",
+      "message": {
+        "id": "m-asst-1",
+        "author": {"role": "assistant"},
+        "content": {
+          "content_type": "text",
+          "parts": ["It looks like a receipt from a hardware store, plus a photo of a bicycle."]
+        },
+        "recipient": "all",
+        "metadata": {"attachments": []}
+      },
+      "parent": "n1",
+      "children": ["n3"]
+    },
+    "n3": {
+      "id": "n3",
+      "message": {
+        "id": "m-asst-2",
+        "author": {"role": "assistant"},
+        "content": {
+          "content_type": "multimodal_text",
+          "parts": [
+            "Here is the cropped version:",
+            {
+              "content_type": "image_asset_pointer",
+              "asset_pointer": "sediment://file_00000000Ddd444",
+              "size_bytes": 8231
+            }
+          ]
+        },
+        "end_turn": true,
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n2",
+      "children": []
+    }
+  }
+}

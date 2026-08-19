@@ -1,0 +1,121 @@
+{
+  "title": "Regenerated answer",
+  "conversation_id": "44444444-4444-4444-8444-444444444444",
+  "create_time": 1703000000.0,
+  "update_time": 1703000300.0,
+  "current_node": "n-b2",
+  "mapping": {
+    "root": {
+      "id": "root",
+      "message": null,
+      "parent": "ghost-node-that-is-not-in-mapping",
+      "children": ["n-sys"]
+    },
+    "n-sys": {
+      "id": "n-sys",
+      "message": {
+        "id": "m-sys",
+        "author": {"role": "system"},
+        "content": {"content_type": "text", "parts": ["You are ChatGPT, a large language model."]},
+        "recipient": "all",
+        "metadata": {"is_visually_hidden_from_conversation": true}
+      },
+      "parent": "root",
+      "children": ["n-ctx"]
+    },
+    "n-ctx": {
+      "id": "n-ctx",
+      "message": {
+        "id": "m-ctx",
+        "author": {"role": "user"},
+        "content": {
+          "content_type": "user_editable_context",
+          "user_profile": "The user prefers short answers.",
+          "user_instructions": "Be concise."
+        },
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n-sys",
+      "children": ["n-empty"]
+    },
+    "n-empty": {
+      "id": "n-empty",
+      "message": null,
+      "parent": "n-ctx",
+      "children": ["n1"]
+    },
+    "n1": {
+      "id": "n1",
+      "message": {
+        "id": "m-user-1",
+        "author": {"role": "user"},
+        "content": {"content_type": "text", "parts": ["Name a good hiking trail near Berlin."]},
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n-empty",
+      "children": ["n-a1", "n-b1"]
+    },
+    "n-a1": {
+      "id": "n-a1",
+      "message": {
+        "id": "m-asst-a1",
+        "author": {"role": "assistant"},
+        "content": {"content_type": "text", "parts": ["FIRST DRAFT — this branch was regenerated away and must not appear."]},
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n1",
+      "children": ["n-a2"]
+    },
+    "n-a2": {
+      "id": "n-a2",
+      "message": {
+        "id": "m-user-a2",
+        "author": {"role": "user"},
+        "content": {"content_type": "text", "parts": ["Also off-branch: this follow-up must not appear either."]},
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n-a1",
+      "children": []
+    },
+    "n-b1": {
+      "id": "n-b1",
+      "message": {
+        "id": "m-asst-b1",
+        "author": {"role": "assistant"},
+        "content": {"content_type": "text", "parts": ["The Havelhöhenweg along the Havel is an easy 10 km walk."]},
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n1",
+      "children": ["n-hidden"]
+    },
+    "n-hidden": {
+      "id": "n-hidden",
+      "message": {
+        "id": "m-hidden",
+        "author": {"role": "assistant"},
+        "content": {"content_type": "text", "parts": ["Hidden bookkeeping message."]},
+        "recipient": "all",
+        "metadata": {"is_visually_hidden_from_conversation": true}
+      },
+      "parent": "n-b1",
+      "children": ["n-b2"]
+    },
+    "n-b2": {
+      "id": "n-b2",
+      "message": {
+        "id": "m-user-b2",
+        "author": {"role": "user"},
+        "content": {"content_type": "text", "parts": ["Perfect, thanks!"]},
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n-hidden",
+      "children": []
+    }
+  }
+}

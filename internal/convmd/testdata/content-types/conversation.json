@@ -1,0 +1,143 @@
+{
+  "title": "Content type zoo",
+  "conversation_id": "55555555-5555-4555-8555-555555555555",
+  "create_time": 1704067199.999,
+  "update_time": 1704067200,
+  "current_node": "n10",
+  "mapping": {
+    "root": {"id": "root", "message": null, "parent": null, "children": ["n1"]},
+    "n1": {
+      "id": "n1",
+      "message": {
+        "id": "m1",
+        "author": {"role": "user"},
+        "content": {"content_type": "text", "parts": ["Look this up for me."]},
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "root",
+      "children": ["n2"]
+    },
+    "n2": {
+      "id": "n2",
+      "message": {
+        "id": "m2",
+        "author": {"role": "tool", "name": "browser"},
+        "content": {
+          "content_type": "tether_quote",
+          "url": "https://example.org/article",
+          "domain": "example.org",
+          "text": "The quoted passage from the page.",
+          "title": "Example article"
+        },
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n1",
+      "children": ["n3"]
+    },
+    "n3": {
+      "id": "n3",
+      "message": {
+        "id": "m3",
+        "author": {"role": "assistant"},
+        "content": {"content_type": "reasoning_recap", "content": "Thought for 5 seconds"},
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n2",
+      "children": ["n4"]
+    },
+    "n4": {
+      "id": "n4",
+      "message": {
+        "id": "m4",
+        "author": {"role": "tool", "name": "browser"},
+        "content": {
+          "content_type": "tether_browsing_display",
+          "result": "# Search results\n\n1. Example article — example.org",
+          "summary": null
+        },
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n3",
+      "children": ["n5"]
+    },
+    "n5": {
+      "id": "n5",
+      "message": {
+        "id": "m5",
+        "author": {"role": "assistant"},
+        "content": {"content_type": "code", "language": null, "text": null},
+        "metadata": {}
+      },
+      "parent": "n4",
+      "children": ["n6"]
+    },
+    "n6": {
+      "id": "n6",
+      "message": {
+        "id": "m6",
+        "author": {"role": "assistant"},
+        "content": {"parts": ["no content_type at all, so the fallback prints the type"]},
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n5",
+      "children": ["n7"]
+    },
+    "n7": {
+      "id": "n7",
+      "message": {
+        "id": "m7",
+        "author": {"role": "user"},
+        "content": {"content_type": "text", "parts": ["", "   "]},
+        "recipient": "all",
+        "metadata": {
+          "attachments": [
+            {"id": "file-BlankBody01", "name": "silent-upload.txt"}
+          ]
+        }
+      },
+      "parent": "n6",
+      "children": ["n8"]
+    },
+    "n8": {
+      "id": "n8",
+      "message": {
+        "id": "m8",
+        "author": {"metadata": {}},
+        "content": {"content_type": "text", "parts": ["This message has an author with no role."]},
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n7",
+      "children": ["n9"]
+    },
+    "n9": {
+      "id": "n9",
+      "message": {
+        "id": "m9",
+        "author": {"role": "ASSISTANT"},
+        "content": {"content_type": "text", "parts": ["Shouty role, capitalized header."]},
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n8",
+      "children": ["n10"]
+    },
+    "n10": {
+      "id": "n10",
+      "message": {
+        "id": "m10",
+        "author": {"role": "tool"},
+        "content": {"content_type": "execution_output", "text": "done"},
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n9",
+      "children": []
+    }
+  }
+}

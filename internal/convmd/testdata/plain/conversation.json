@@ -1,0 +1,51 @@
+{
+  "title": "Weekend plans",
+  "conversation_id": "11111111-1111-4111-8111-111111111111",
+  "create_time": 1700000000.712345,
+  "update_time": 1700003600.0,
+  "current_node": "n2",
+  "mapping": {
+    "root": {
+      "id": "root",
+      "message": null,
+      "parent": null,
+      "children": ["n1"]
+    },
+    "n1": {
+      "id": "n1",
+      "message": {
+        "id": "m-user-1",
+        "author": {"role": "user", "name": null, "metadata": {}},
+        "create_time": 1700000000.1,
+        "content": {"content_type": "text", "parts": ["What should I cook tonight?"]},
+        "status": "finished_successfully",
+        "recipient": "all",
+        "metadata": {"request_id": "abc123"}
+      },
+      "parent": "root",
+      "children": ["n2"]
+    },
+    "n2": {
+      "id": "n2",
+      "message": {
+        "id": "m-asst-1",
+        "author": {"role": "assistant", "name": null, "metadata": {}},
+        "create_time": 1700000002.5,
+        "content": {
+          "content_type": "text",
+          "parts": [
+            "Two easy options:\n\n1. Pasta with garlic and olive oil.\n2. Fried rice with whatever is in the fridge.",
+            "",
+            "Tell me what you have and I'll narrow it down."
+          ]
+        },
+        "status": "finished_successfully",
+        "end_turn": true,
+        "recipient": "all",
+        "metadata": {"model_slug": "gpt-4o"}
+      },
+      "parent": "n1",
+      "children": []
+    }
+  }
+}
