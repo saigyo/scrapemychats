@@ -1,0 +1,10 @@
+{
+  "_comment": "top-level comment, must be skipped",
+  "Work": {
+    "_comment": "sub comment, skipped",
+    "Code & Data": ["python", "script", "sql"]
+  },
+  "Personal": {
+    "Food & Cooking": ["recipe", "sauce", "dinner"]
+  }
+}

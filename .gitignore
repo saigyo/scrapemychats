@@ -1,8 +1,8 @@
 # your exported data — never commit this
-export/
+/export/
 chats*.csv
 manifest.csv
-categories.json
+/categories.json
 
 # browser session (contains your ChatGPT login!)
 browser_profile/
