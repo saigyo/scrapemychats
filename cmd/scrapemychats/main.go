@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/saigyo/scrapemychats/internal/browser"
 	"github.com/saigyo/scrapemychats/internal/export"
 	"github.com/saigyo/scrapemychats/internal/viewer"
@@ -311,12 +313,11 @@ func wasCancelled(ctx context.Context, err error) bool {
 	return ctx.Err() != nil || errors.Is(err, context.Canceled)
 }
 
-// isTTY reports whether f is a character device (an interactive terminal),
-// used to decide whether the end-of-run pause makes sense.
+// isTTY reports whether f is an interactive terminal, used to decide whether
+// the end-of-run pause makes sense. term.IsTerminal is used rather than a raw
+// ModeCharDevice check so that character devices which are not terminals
+// (notably /dev/null) don't trigger the prompt, and so Windows consoles are
+// detected correctly for the double-click flow.
 func isTTY(f *os.File) bool {
-	info, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
 }
