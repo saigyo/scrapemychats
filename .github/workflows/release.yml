@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  # GoReleaser needs write access to create the GitHub Release and upload assets.
+  contents: write
+
+# Security posture: this job HOLDS THE macOS SIGNING SECRETS (Developer ID cert
+# + App Store Connect notary key). So it is hardened against supply-chain risk:
+#
+#   * Every third-party action is pinned to an immutable commit SHA (a tag like
+#     @v7 is mutable and could be repointed at malicious code).
+#   * GoReleaser is installed by a fail-CLOSED download: we fetch the exact
+#     release tarball and verify its SHA-256 before running it. We deliberately
+#     do NOT use goreleaser/goreleaser-action, whose checksum verification is
+#     fail-OPEN (it proceeds if verification can't be done) — unacceptable for a
+#     secret-holding job.
+#
+# Signing runs on ubuntu-latest because GoReleaser's quill notarize backend is
+# pure Go and keychain-free (no macOS runner needed).
+#
+# To bump GoReleaser: pick the new version, take goreleaser_Linux_x86_64.tar.gz's
+# digest from that release's checksums.txt (cross-check it against the release
+# page), and update both GORELEASER_VERSION and GORELEASER_SHA256 below.
+env:
+  GORELEASER_VERSION: v2.17.1
+  GORELEASER_SHA256: a99bbc7ae0d8d897b07c4c497a9b62f222558804715ef219d1af05a7e417bc80
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history so GoReleaser can build the changelog from tags.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Install goreleaser (digest-verified, fail-closed)
+        run: |
+          curl -fsSLo "$RUNNER_TEMP/goreleaser.tgz" \
+            "https://github.com/goreleaser/goreleaser/releases/download/${GORELEASER_VERSION}/goreleaser_Linux_x86_64.tar.gz"
+          echo "${GORELEASER_SHA256}  $RUNNER_TEMP/goreleaser.tgz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/goreleaser-bin"
+          tar -xzf "$RUNNER_TEMP/goreleaser.tgz" -C "$RUNNER_TEMP/goreleaser-bin" goreleaser
+
+      # The ONLY step that sees the signing secrets. If the five MACOS_* secrets
+      # are unset (e.g. a fork), the notarize block skips and darwin ships
+      # unsigned — the release still succeeds.
+      - name: Release
+        run: '"$RUNNER_TEMP/goreleaser-bin/goreleaser" release --clean'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}

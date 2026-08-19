@@ -1,0 +1,109 @@
+# GoReleaser configuration for scrapemychats.
+# Schema: GoReleaser v2 (https://goreleaser.com/customization/).
+#
+# Local sanity check (does not release):
+#   goreleaser check
+#   goreleaser release --snapshot --clean   # builds into ./dist without publishing
+#
+# A real release is cut by pushing a tag (see .github/workflows/release.yml):
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# macOS signing + notarization: the `notarize` block below signs each per-arch
+# darwin binary with a real Developer ID and notarizes it with Apple. It uses
+# GoReleaser's built-in quill backend, which is pure Go and keychain-free, so
+# the whole release runs on a plain ubuntu-latest runner (no macOS runner, no
+# `codesign` binary). When the five MACOS_* secrets are absent (e.g. a fork or
+# a local snapshot) the notarize step is skipped cleanly and the darwin builds
+# ship unsigned. See docs/release-signing.md.
+version: 2
+
+project_name: scrapemychats
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: scrapemychats
+    main: ./cmd/scrapemychats
+    binary: scrapemychats
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - windows
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      # -s -w strips debug info (~smaller binary); main.version is stamped so
+      # `scrapemychats --version` reports the released tag.
+      - -s -w -X main.version={{ .Version }}
+
+# We deliberately ship per-arch darwin binaries (no universal binary): quill
+# signs each per-arch darwin build binary directly in the `notarize` block
+# below.
+
+archives:
+  - id: scrapemychats
+    ids:
+      - scrapemychats
+    formats:
+      - zip
+    # Resolved examples:
+    #   darwin/amd64  -> scrapemychats_darwin_amd64.zip
+    #   darwin/arm64  -> scrapemychats_darwin_arm64.zip
+    #   windows/amd64 -> scrapemychats_windows_amd64.zip
+    #   linux/amd64   -> scrapemychats_linux_amd64.zip
+    #   linux/arm64   -> scrapemychats_linux_arm64.zip
+    # install.sh depends on these EXACT names — keep the two in sync.
+    name_template: '{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}'
+    files:
+      - README.md
+      - LICENSE
+      - categories.example.json
+
+checksum:
+  name_template: checksums.txt
+
+# No UPX compression — it trips antivirus/SmartScreen heuristics and Gatekeeper.
+
+# Sign + notarize the darwin binaries with a real Developer ID via quill (pure
+# Go, keychain-free — runs on ubuntu-latest). `enabled` is gated on all five
+# secrets being present, so this whole step is skipped cleanly when they aren't
+# set (forks, local snapshot builds) and the darwin builds simply ship
+# unsigned. Setup + secret contents: docs/release-signing.md.
+notarize:
+  macos:
+    - enabled: '{{ and (isEnvSet "MACOS_SIGN_P12") (isEnvSet "MACOS_SIGN_PASSWORD") (isEnvSet "MACOS_NOTARY_ISSUER_ID") (isEnvSet "MACOS_NOTARY_KEY_ID") (isEnvSet "MACOS_NOTARY_KEY") }}'
+      # `ids` defaults to the PROJECT name, which matches no build — it must
+      # name our build id so quill finds the darwin binaries to sign.
+      ids: [scrapemychats]
+      sign:
+        certificate: "{{ .Env.MACOS_SIGN_P12 }}"
+        password: "{{ .Env.MACOS_SIGN_PASSWORD }}"
+      notarize:
+        issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
+        key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
+        key: "{{ .Env.MACOS_NOTARY_KEY }}"
+        wait: true
+        timeout: 20m
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  github:
+    owner: saigyo
+    name: scrapemychats
+  # Also attach the installer to each release so it can be inspected there.
+  # The curl one-liner in the README fetches install.sh from raw.githubusercontent
+  # on the default branch; install.sh then downloads the archive from this release.
+  extra_files:
+    - glob: ./install.sh

@@ -40,7 +40,87 @@ it works from a USB stick.
 ![Searching the archive — instant full-text search with highlighted matches](docs/viewer-search.png)
 *Full-text search is instant and highlights matches in the results and inside the open chat. (Sample data shown.)*
 
-## Quick start (if you're comfortable with a terminal)
+---
+
+## Get it
+
+There are two ways to run scrapemychats. **Both produce the exact same
+archive** — same folder layout, same resume markers, same `manifest.csv`,
+same viewer — so they're completely interchangeable. You can even start with
+one and finish with the other.
+
+### Option A — Download the app (no Python, recommended for most people)
+
+A single self-contained program. No installation, no dependencies to set up.
+It still drives **your own** Chrome or Edge, so make sure one of those is
+installed (on Windows, Edge is already there).
+
+<details open>
+<summary><strong>macOS</strong></summary>
+
+The macOS builds are **signed with an Apple Developer ID and notarized by
+Apple**, so they run without the old "unidentified developer" block — no
+right-click tricks, no `xattr`.
+
+**Easiest — the one-line installer** (auto-detects Intel vs Apple Silicon):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/saigyo/scrapemychats/main/install.sh | sh
+```
+
+It downloads the right binary into `~/Documents/scrapemychats` and tells you
+how to run it. (Pass a folder to install elsewhere:
+`… | sh -s -- ~/Apps/scrapemychats`.)
+
+**Or download the zip manually** from the
+[Releases page](https://github.com/saigyo/scrapemychats/releases). The build
+is per-CPU, so pick the one for your Mac:
+
+- **Apple Silicon** (M1/M2/M3/M4…) → `scrapemychats_darwin_arm64.zip`
+- **Intel** → `scrapemychats_darwin_amd64.zip`
+
+Not sure which you have? **Apple menu → About This Mac** and look for
+"Apple M-series" (Apple Silicon) or "Intel". (The `curl` installer picks
+automatically — the easy path if you'd rather not check.)
+
+Unzip it and run the `scrapemychats` program. Double-clicking a bare
+command-line binary opens it in a Terminal window — that's expected. On the
+very first launch macOS may pause a moment to verify the notarization online;
+that's normal, and it doesn't happen again.
+
+</details>
+
+<details>
+<summary><strong>Windows</strong></summary>
+
+1. Download `scrapemychats_windows_amd64.zip` from the
+   [Releases page](https://github.com/saigyo/scrapemychats/releases).
+2. In File Explorer, right-click the zip → **Extract All**.
+3. Double-click `scrapemychats.exe`.
+4. Windows SmartScreen may warn that it's from an unknown publisher. Click
+   **More info → Run anyway** (a one-time thing).
+
+Requires **Chrome or Edge** installed — Edge is preinstalled on Windows, so
+this works out of the box.
+
+</details>
+
+**What happens when you run it:** a Chrome or Edge window opens → **log into
+ChatGPT** in it (pick the right workspace if you have several) → it then runs
+unattended for a while (big accounts take a few hours — this is deliberate,
+see [Things to know](#things-to-know)). When it's done it builds the viewer
+and the window waits for you to press **Enter** before closing, so a
+double-clicked window doesn't vanish. Your files are in the folder next to
+the app. **Closing the window or pressing Ctrl+C is safe — re-running resumes
+where it left off.**
+
+By default the app keeps everything — the export, the chat list, the viewer,
+and its saved login (`browser_profile/`) — in the folder next to the program.
+If that folder isn't writable, it falls back to `~/Documents/scrapemychats`.
+
+### Option B — Run the Python scripts (for developers / if you already have Python)
+
+The same tool as a pair of Python scripts you can read and modify.
 
 Requirements: Python 3.10+, Google Chrome
 (or Microsoft Edge with `--browser-channel msedge`).
@@ -63,15 +143,16 @@ The chat list is discovered automatically (including chats inside
 Projects) and saved to `chats.csv`. Alternatively supply your own list
 with `--csv mylist.csv` (first column: chat URL, second: title).
 
----
-
-## Never used a terminal? Start here
+#### Never used a terminal? Start here
 
 You don't need to be a programmer. There are ~10 steps and each one is a
 thing you type or click. Set aside 20 minutes for setup, then the export
 itself runs unattended for a few hours.
 
-### Windows
+> Just want the simplest path? Use **Option A** above instead — it's a
+> download, no Python required.
+
+##### Windows
 
 1. **Install Python.** Go to [python.org/downloads](https://www.python.org/downloads/),
    click the big yellow button, run the installer — and **tick the box that
@@ -110,7 +191,7 @@ itself runs unattended for a few hours.
    then double-click `export\viewer.html`. That's your archive — searchable,
    offline, yours.
 
-### Mac (OS X)
+##### Mac (OS X)
 
 1. **Install Python.** Go to [python.org/downloads](https://www.python.org/downloads/),
    download the macOS installer, and run it with the default options.
@@ -148,7 +229,7 @@ itself runs unattended for a few hours.
 
 > On a Mac, type `python3` wherever this README says `python`.
 
-### Stuck? Let an AI walk you through it
+#### Stuck? Let an AI walk you through it
 
 Honestly, the easiest path for a non-technical person is to let an AI
 assistant drive:
@@ -175,15 +256,33 @@ assistant drive:
   also fix anything unexpected (a changed endpoint, an odd error) on the
   spot — which a static README never can.
 
+### Which one should I use?
+
+- **Just want your chats out, with the least fuss?** → **Option A (the app).**
+  Nothing to install, no Python.
+- **A developer, or want to read/modify the code?** → **Option B (Python).**
+
+They're interchangeable: both produce the exact same archive (same folder
+layout, resume markers, `manifest.csv`, and viewer), so you can even switch
+between them mid-export — the app will happily resume a run the Python
+scripts started, and vice versa.
+
 ---
 
 ## Categories (optional)
 
+Group chats into a Personal/Work tree in the viewer by keyword. Copy the
+example file, edit it, and rebuild:
+
 ```bash
 cp categories.example.json categories.json     # Windows: copy categories.example.json categories.json
 # edit the groups / subcategories / keywords to match your life
-python build_viewer.py
 ```
+
+- **App (Option A):** it picks up `categories.json` sitting next to the
+  program automatically; point elsewhere with `--categories path/to/file.json`.
+- **Python (Option B):** it picks up `categories.json` next to
+  `build_viewer.py`. Rebuild with `python build_viewer.py`.
 
 Chats are auto-filed by keyword scoring (title matches weigh 4×). Anything
 matching nothing lands in **Unsorted** — skim that list, add keywords, and
@@ -192,7 +291,7 @@ re-run; regeneration takes seconds.
 ## Things to know
 
 - **It's slow on purpose.** ChatGPT throttles bulk access ("You're making
-  requests too quickly"). The script paces itself (~10–20 s per chat), backs
+  requests too quickly"). The tool paces itself (~10–20 s per chat), backs
   off in escalating steps when throttled, and permanently slows down each
   time it happens. A 600-chat archive takes a few hours. Let it run.
 - **It's resumable.** Interrupt any time; re-running skips everything
@@ -204,20 +303,26 @@ re-run; regeneration takes seconds.
   recovers what it can from your account's file Library and from
   code-generated (sandbox) files.
 - **Headless doesn't work.** ChatGPT's bot protection blocks invisible
-  browsers; the visible Chrome window is required.
-- **Privacy.** `export/`, `chats.csv`, and `browser_profile/` are
-  git-ignored. `browser_profile/` contains your live ChatGPT login — never
-  share or commit it, and delete it when you're done.
+  browsers; the visible Chrome/Edge window is required.
+- **Privacy.** Your export, chat list, and browser profile stay on your
+  machine. The saved login lives in `browser_profile/` — next to the app for
+  Option A, next to the scripts for Option B — and it contains your **live
+  ChatGPT session**. Never share or commit it, and delete it when you're
+  done. (`export/`, `chats.csv`, and `browser_profile/` are git-ignored.)
 
 ## How it works
 
-Rather than scraping the page or asking for your credentials, the script
+Rather than scraping the page or asking for your credentials, the tool
 waits for ChatGPT's own frontend to request each conversation's JSON from
 its backend and captures that response. Attachments come through the files
 API, generated files through the interpreter-download API, and stale
 uploads through the account Library — all using the same session headers
 the page itself uses. This makes the export complete and robust to UI
 redesigns.
+
+The downloadable app (Option A) is a single Go binary that does exactly the
+same thing: it drives your system Chrome or Edge over the DevTools protocol —
+no browser is bundled — and captures the same backend responses.
 
 ## Disclaimer
 

@@ -15,3 +15,10 @@ __pycache__/
 
 # editor/IDE
 .idea/
+
+# GoReleaser output
+/dist/
+
+# built Go binary at the repo root (NOT the cmd/scrapemychats/ source dir)
+/scrapemychats
+/scrapemychats.exe
