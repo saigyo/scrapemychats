@@ -79,6 +79,43 @@ if ! curl -fsSL "$URL" -o "$TMP/$ARCHIVE"; then
   exit 1
 fi
 
+# --- Verify the download against the release checksums -----------------------
+# GoReleaser publishes checksums.txt (lines "<sha256>  <archive>") with every
+# release. We verify the archive against it before extracting: on macOS Apple's
+# notarization is the primary integrity guarantee, but this also covers the
+# Linux archive and catches a truncated/corrupted download everywhere.
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
+if ! curl -fsSL "https://github.com/${REPO}/releases/latest/download/checksums.txt" -o "$TMP/checksums.txt"; then
+  err "Could not download checksums.txt to verify the archive; aborting."
+  exit 1
+fi
+expected="$(awk -v f="$ARCHIVE" '$2 == f {print $1}' "$TMP/checksums.txt")"
+if [ -z "$expected" ]; then
+  err "No checksum for $ARCHIVE in checksums.txt; aborting."
+  exit 1
+fi
+if ! actual="$(sha256_of "$TMP/$ARCHIVE")"; then
+  err "Neither sha256sum nor shasum is available to verify the download; aborting."
+  exit 1
+fi
+if [ "$actual" != "$expected" ]; then
+  err "Checksum mismatch for $ARCHIVE:"
+  err "  expected $expected"
+  err "  got      $actual"
+  err "Refusing to install a tampered or corrupted download."
+  exit 1
+fi
+printf 'Checksum verified.\n'
+
 printf 'Extracting into %s\n' "$DEST"
 # -o overwrites without prompting, making re-runs idempotent.
 unzip -o -q "$TMP/$ARCHIVE" -d "$DEST"

@@ -89,6 +89,12 @@ func getSlice(m map[string]any, key string) []any {
 	return v
 }
 
+// getFloat reads a numeric field. This package decodes with plain
+// json.Unmarshal (never UseNumber), so JSON numbers are always float64 and the
+// single float64 assertion suffices; convmd's copy carries extra json.Number /
+// bool branches for its own inputs, but on the values this package sees (the
+// "total" field) both agree — do not "unify" them by adding unreachable
+// branches here.
 func getFloat(m map[string]any, key string) (float64, bool) {
 	f, ok := m[key].(float64)
 	return f, ok
