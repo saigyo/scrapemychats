@@ -31,8 +31,11 @@ import (
 //   - PostJSON is an in-page session-authenticated POST, used for the Library
 //     listing.
 //   - GetBinary is an out-of-page GET of a pre-signed URL returning raw bytes.
-//   - GetBinaryInPage is the 403 fallback that fetches the bytes inside the
-//     page (kept for symmetry with the Python; see browser.GetBinaryInPage).
+//   - GetBinaryInPage is an in-page fetch of the bytes, available as a fallback
+//     for a URL that needs the browsing session (cookies) rather than a
+//     pre-signed signature. The current download paths only ever hit
+//     pre-signed URLs, so this is not wired in — matching the Python, which
+//     likewise has no in-page download fallback (see browser.GetBinaryInPage).
 type Client interface {
 	Fetch(url string, headers map[string]string) (status int, body string, err error)
 	PostJSON(url string, headers map[string]string, body any) (status int, body2 string, err error)
