@@ -1,0 +1,101 @@
+{
+  "title": "Umsatz-Auswertung 📊 (日本語テスト)",
+  "conversation_id": "66666666-6666-4666-8666-666666666666",
+  "create_time": 1705312496.5,
+  "update_time": 1705312800.0,
+  "current_node": "b4",
+  "mapping": {
+    "root": {"id": "root", "message": null, "parent": null, "children": ["z1"]},
+    "z1": {
+      "id": "z1",
+      "message": {
+        "id": "m-z1",
+        "author": {"role": "user"},
+        "content": {
+          "content_type": "multimodal_text",
+          "parts": [
+            {"content_type": "image_asset_pointer", "asset_pointer": "file-service://file-Zebra001"},
+            "Bitte werte die Datei aus — Grüße aus Köln! 🇩🇪\n\nNaïve café façade, élève, ǅ, and 中文字符。"
+          ]
+        },
+        "recipient": "all",
+        "metadata": {
+          "attachments": [
+            {"id": "file-Zebra001", "name": "notizen 日本語.txt", "size": 91}
+          ]
+        }
+      },
+      "parent": "root",
+      "children": ["a2"]
+    },
+    "a2": {
+      "id": "a2",
+      "message": {
+        "id": "m-a2",
+        "author": {"role": "assistant"},
+        "content": {
+          "content_type": "multimodal_text",
+          "parts": [
+            "Fertig! Ergebnisse: [CSV](sandbox:/mnt/data/results.csv) und [Diagramm](sandbox:/mnt/data/chart.png) 🎉",
+            {"content_type": "image_asset_pointer", "asset_pointer": "file-service://file-Alpha002", "size_bytes": 4096}
+          ]
+        },
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "z1",
+      "children": ["m3"]
+    },
+    "m3": {
+      "id": "m3",
+      "message": {
+        "id": "m-m3",
+        "author": {"role": "tool", "name": "python"},
+        "content": {
+          "content_type": "execution_output",
+          "text": "Rewrote sandbox:/mnt/data/chart.png\nAlso wrote sandbox:/mnt/data/naïve.csv and sandbox:/mnt/data/my file.txt\nDone ✔"
+        },
+        "recipient": "all",
+        "metadata": {
+          "attachments": [
+            {"id": "file-Alpha002", "name": "chart.png"}
+          ]
+        }
+      },
+      "parent": "a2",
+      "children": ["b4"]
+    },
+    "b4": {
+      "id": "b4",
+      "message": {
+        "id": "m-b4",
+        "author": {"role": "assistant"},
+        "content": {
+          "content_type": "text",
+          "parts": ["Zusammenfassung: [summary.md](sandbox:/mnt/data/summary.md) — 完了 ✅"]
+        },
+        "end_turn": true,
+        "recipient": "all",
+        "metadata": {
+          "attachments": [
+            {"id": "file-Zebra001", "name": "notizen-v2.txt"},
+            {"id": "file-Beta003", "name": null}
+          ]
+        }
+      },
+      "parent": "m3",
+      "children": ["no-id"]
+    },
+    "no-id": {
+      "id": "no-id",
+      "message": {
+        "author": {"role": "tool", "name": "python"},
+        "content": {"content_type": "execution_output", "text": "orphan message without an id: sandbox:/mnt/data/orphan.bin"},
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "b4",
+      "children": []
+    }
+  }
+}

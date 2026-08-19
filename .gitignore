@@ -12,3 +12,6 @@ browser_profile/
 
 __pycache__/
 *.pyc
+
+# editor/IDE
+.idea/

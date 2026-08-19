@@ -1,0 +1,40 @@
+{
+  "conversation_id": "77777777-7777-4777-8777-777777777777",
+  "create_time": 0,
+  "update_time": null,
+  "mapping": {
+    "root": {"id": "root", "message": null, "parent": null, "children": ["n1"]},
+    "n1": {
+      "id": "n1",
+      "message": {},
+      "parent": "root",
+      "children": ["n2"]
+    },
+    "n2": {
+      "id": "n2",
+      "message": {
+        "id": "m2",
+        "author": {"role": "user"},
+        "content": {"content_type": "text", "parts": ["This chat has no current_node, so nothing is rendered."]},
+        "recipient": "all",
+        "metadata": {
+          "attachments": [
+            {"id": "file-Orphan0001", "name": "still-collected.txt"}
+          ]
+        }
+      },
+      "parent": "n1",
+      "children": ["n3"]
+    },
+    "n3": {
+      "id": "n3",
+      "message": {
+        "id": "m3",
+        "author": {"role": "tool", "name": "python"},
+        "content": {"content_type": "execution_output", "text": "wrote sandbox:/mnt/data/still-collected.bin"}
+      },
+      "parent": "n2",
+      "children": []
+    }
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "title": "Plot the sales numbers",
+  "conversation_id": "22222222-2222-4222-8222-222222222222",
+  "create_time": 1701000000.0,
+  "update_time": 1701000200.9,
+  "current_node": "n6",
+  "mapping": {
+    "root": {"id": "root", "message": null, "parent": null, "children": ["n1"]},
+    "n1": {
+      "id": "n1",
+      "message": {
+        "id": "m-user-1",
+        "author": {"role": "user"},
+        "content": {"content_type": "text", "parts": ["Plot last quarter's sales, please."]},
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "root",
+      "children": ["n2"]
+    },
+    "n2": {
+      "id": "n2",
+      "message": {
+        "id": "m-thoughts-1",
+        "author": {"role": "assistant"},
+        "content": {
+          "content_type": "thoughts",
+          "thoughts": [
+            {"summary": "Reading the request", "content": "The user wants a chart of quarterly sales."},
+            {"summary": "Choosing a tool", "content": "matplotlib is available in the sandbox."},
+            {"content": "No summary on this one."}
+          ],
+          "source_analysis_msg_id": "m-code-hidden"
+        },
+        "recipient": "all",
+        "metadata": {}
+      },
+      "parent": "n1",
+      "children": ["n3"]
+    },
+    "n3": {
+      "id": "n3",
+      "message": {
+        "id": "m-code-hidden",
+        "author": {"role": "assistant"},
+        "content": {"content_type": "code", "language": "python", "text": "print('this message is addressed to the python tool and is hidden')"},
+        "recipient": "python",
+        "metadata": {}
+      },
+      "parent": "n2",
+      "children": ["n4"]
+    },
+    "n4": {
+      "id": "n4",
+      "message": {
+        "id": "m-code-1",
+        "author": {"role": "assistant"},
+        "content": {
+          "content_type": "code",
+          "language": "python",
+          "text": "import matplotlib.pyplot as plt\n\nsales = [12, 19, 7, 24]\nplt.plot(sales)\nplt.savefig('/mnt/data/sales.png')"
+        },
+        "metadata": {}
+      },
+      "parent": "n3",
+      "children": ["n5"]
+    },
+    "n5": {
+      "id": "n5",
+      "message": {
+        "id": "m-exec-1",
+        "author": {"role": "tool", "name": "python"},
+        "content": {"content_type": "execution_output", "text": "<Figure size 640x480 with 1 Axes>\nSaved to /mnt/data/sales.png"},
+        "recipient": "all",
+        "metadata": {"is_complete": true}
+      },
+      "parent": "n4",
+      "children": ["n6"]
+    },
+    "n6": {
+      "id": "n6",
+      "message": {
+        "id": "m-asst-1",
+        "author": {"role": "assistant"},
+        "content": {
+          "content_type": "text",
+          "parts": ["Here is the chart: [sales.png](sandbox:/mnt/data/sales.png)"]
+        },
+        "end_turn": true,
+        "recipient": "all",
+        "metadata": {"model_slug": "gpt-4o"}
+      },
+      "parent": "n5",
+      "children": []
+    }
+  }
+}
