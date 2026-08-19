@@ -66,6 +66,33 @@ jobs:
           tar -xzf "$RUNNER_TEMP/go.tgz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/go/bin" >> "$GITHUB_PATH"
 
+      # An official release (a v* tag) must be signed + notarized — the README
+      # promises every macOS download is. The notarize block skips silently when
+      # a secret is missing (so forks and local snapshots still build), which
+      # would let a real release ship unsigned if a secret were dropped from the
+      # 'release' environment. Fail closed here instead. (Snapshot builds don't
+      # run this workflow, so they stay unsigned as intended.)
+      - name: Require macOS signing secrets
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+        run: |
+          missing=""
+          [ -z "$MACOS_SIGN_P12" ]         && missing="$missing MACOS_SIGN_P12"
+          [ -z "$MACOS_SIGN_PASSWORD" ]    && missing="$missing MACOS_SIGN_PASSWORD"
+          [ -z "$MACOS_NOTARY_ISSUER_ID" ] && missing="$missing MACOS_NOTARY_ISSUER_ID"
+          [ -z "$MACOS_NOTARY_KEY_ID" ]    && missing="$missing MACOS_NOTARY_KEY_ID"
+          [ -z "$MACOS_NOTARY_KEY" ]       && missing="$missing MACOS_NOTARY_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Refusing to publish an unsigned release. Missing signing secrets:$missing"
+            echo "Configure them in the 'release' environment — see docs/release-signing.md."
+            exit 1
+          fi
+          echo "All five macOS signing secrets are present."
+
       - name: Install goreleaser (digest-verified, fail-closed)
         run: |
           curl -fsSLo "$RUNNER_TEMP/goreleaser.tgz" \

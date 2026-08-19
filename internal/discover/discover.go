@@ -20,6 +20,7 @@
 package discover
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -436,27 +437,23 @@ func DiscoverChats(f browser.Fetcher, headers map[string]string, csvPath string)
 		newRows = append(newRows, [2]string{c.URL, c.Title})
 	}
 
-	out, err := os.Create(csvPath)
-	if err != nil {
-		return fmt.Errorf("discover: writing %s: %w", csvPath, err)
-	}
-	defer out.Close()
-	w := csv.NewWriter(out)
-	if err := w.Write([]string{"url", "title"}); err != nil {
-		return fmt.Errorf("discover: writing %s: %w", csvPath, err)
-	}
-	for _, row := range existingRows {
-		if err := w.Write(row[:]); err != nil {
-			return fmt.Errorf("discover: writing %s: %w", csvPath, err)
-		}
-	}
-	for _, row := range newRows {
+	// Build the merged CSV in memory, then write it atomically: truncating
+	// csvPath in place and streaming rows would destroy the previously usable
+	// chat list if discovery crashed or the disk filled mid-write.
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	rows := append([][2]string{{"url", "title"}}, existingRows...)
+	rows = append(rows, newRows...)
+	for _, row := range rows {
 		if err := w.Write(row[:]); err != nil {
 			return fmt.Errorf("discover: writing %s: %w", csvPath, err)
 		}
 	}
 	w.Flush()
 	if err := w.Error(); err != nil {
+		return fmt.Errorf("discover: writing %s: %w", csvPath, err)
+	}
+	if err := fsutil.WriteFileAtomic(csvPath, buf.Bytes(), 0o644); err != nil {
 		return fmt.Errorf("discover: writing %s: %w", csvPath, err)
 	}
 
