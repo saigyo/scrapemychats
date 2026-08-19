@@ -409,6 +409,37 @@ func TestAuthTimeoutErrorPrefersNavError(t *testing.T) {
 
 // The signal channel is buffered and written once, so a burst of matching
 // requests can never block chromedp's event goroutine.
+func TestAuthWatcherRequiresAuthorizationNotAccountIDAlone(t *testing.T) {
+	w := newAuthWatcher("/backend-api/conversations?")
+	// A matching request carrying only the account id (no bearer token) must
+	// NOT complete the capture — publishing it would leave discovery
+	// unauthenticated.
+	w.handle(requestEvent("1", BaseURL+"/backend-api/conversations?offset=0", "GET",
+		network.Headers{"chatgpt-account-id": "acct-1"}))
+	select {
+	case auth := <-w.ch:
+		t.Fatalf("completed with account-id but no Authorization: %v", auth)
+	default:
+	}
+	if !w.sawMatch {
+		t.Error("the matching request should be recorded for the timeout diagnostic")
+	}
+	// Authorization arrives later via ExtraInfo; now it completes with BOTH.
+	w.handle(&network.EventRequestWillBeSentExtraInfo{
+		RequestID: "1",
+		Headers:   network.Headers{"authorization": "Bearer late"},
+	})
+	select {
+	case auth := <-w.ch:
+		want := map[string]string{"Authorization": "Bearer late", "chatgpt-account-id": "acct-1"}
+		if !reflect.DeepEqual(auth, want) {
+			t.Errorf("auth = %v, want %v", auth, want)
+		}
+	default:
+		t.Fatal("Authorization arriving via ExtraInfo did not complete the capture")
+	}
+}
+
 func TestAuthWatcherSignalsOnlyOnce(t *testing.T) {
 	w := newAuthWatcher("/backend-api/conversations?")
 	for i := 0; i < 5; i++ {

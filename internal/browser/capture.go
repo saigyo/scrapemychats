@@ -146,12 +146,21 @@ func (w *authWatcher) handle(ev any) {
 }
 
 // consider must be called with mu held. It notes that a matching request was
-// seen (used only to explain a timeout) and completes the wait as soon as a
-// request carries usable auth headers.
+// seen (used only to explain a timeout) and completes the wait once the
+// request carries the Authorization bearer token.
+//
+// It waits specifically for Authorization, not merely any auth header: the
+// Bearer token is what authenticates the /backend-api calls, whereas
+// chatgpt-account-id is only the workspace id on business accounts. That id
+// can appear in the provisional RequestWillBeSent before Authorization is
+// merged in from RequestWillBeSentExtraInfo; completing on the id alone would
+// publish an unauthenticated header set and leave discovery making 401s. Both
+// event handlers re-call consider on the merged map, so the wait completes as
+// soon as Authorization lands, whichever event carried it.
 func (w *authWatcher) consider(h map[string]string) {
 	w.sawMatch = true
 	auth := AuthHeaders(h)
-	if len(auth) == 0 {
+	if auth["Authorization"] == "" {
 		return
 	}
 	w.once.Do(func() { w.ch <- auth })
