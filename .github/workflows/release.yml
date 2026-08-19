@@ -33,6 +33,13 @@ env:
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    # The five MACOS_* signing secrets live in the 'release' environment,
+    # not as repository secrets: environment secrets are withheld until the
+    # environment's protection rules pass (required reviewer + v* tag rule),
+    # so a rogue workflow on another ref — or a pushed v* tag that nobody
+    # approves — never sees them. Each release run pauses in the Actions UI
+    # until the reviewer approves.
+    environment: release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
