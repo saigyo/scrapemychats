@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"strings"
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
@@ -82,6 +84,26 @@ func allocatorOptions(opts Options) []chromedp.ExecAllocatorOption {
 	return out
 }
 
+// chromedpErrorf routes chromedp's internal error log. chromedp prints an
+// "unhandled ... event: ..." notice for every CDP event it does not model —
+// e.g. dom.EventTopLayerElementsUpdated, which modern Chrome emits for
+// popovers/dialogs/<dialog> top-layer changes on ordinary pages. These are
+// harmless and only alarm the user (they read as "ERROR"), so they are
+// dropped; anything else is a genuine problem and is forwarded to stderr.
+func chromedpErrorf(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	if isBenignChromedpNoise(msg) {
+		return
+	}
+	log.Printf("chromedp: %s", msg)
+}
+
+// isBenignChromedpNoise reports whether msg is one of chromedp's informational
+// "unhandled ... event" notices, which are safe to discard.
+func isBenignChromedpNoise(msg string) bool {
+	return strings.Contains(msg, "unhandled") && strings.Contains(msg, "event")
+}
+
 // Session is a running, headed browser plus the page (CDP target) the export
 // drives. It is not safe for concurrent use by multiple goroutines beyond
 // what the individual functions in this package do internally.
@@ -121,7 +143,7 @@ func Launch(ctx context.Context, opts Options) (*Session, error) {
 	s := &Session{ExecPath: opts.ExecPath, ProfileDir: opts.ProfileDir}
 	s.cancels = append(s.cancels, allocCancel)
 
-	tabCtx, tabCancel := chromedp.NewContext(allocCtx)
+	tabCtx, tabCancel := chromedp.NewContext(allocCtx, chromedp.WithErrorf(chromedpErrorf))
 	s.cancels = append(s.cancels, tabCancel)
 	s.ctx = tabCtx
 
