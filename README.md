@@ -331,6 +331,28 @@ website may be subject to its terms of use — this tool deliberately behaves
 like a (patient) human reader, but you use it at your own risk. Not
 affiliated with OpenAI.
 
+## Third-party licenses
+
+The downloadable app (Option A) builds on these components (direct
+dependencies; everything is statically linked into the binary):
+
+| Component | Use | License |
+|---|---|---|
+| [chromedp](https://github.com/chromedp/chromedp) © The chromedp Authors | Drives your Chrome/Edge over the DevTools protocol | [MIT](https://github.com/chromedp/chromedp/blob/master/LICENSE) |
+| [cdproto](https://github.com/chromedp/cdproto) © The chromedp Authors | DevTools protocol types used by chromedp | [MIT](https://github.com/chromedp/cdproto/blob/master/LICENSE) |
+| [flock](https://github.com/gofrs/flock) © Tim Heckman, The Gofrs | Lock file so a second launch can't clobber a running export | [BSD-3-Clause](https://github.com/gofrs/flock/blob/main/LICENSE) |
+| [golang.org/x/term](https://pkg.go.dev/golang.org/x/term) © The Go Authors | Detects whether output is a terminal (for the exit pause) | [BSD-3-Clause](https://cs.opensource.google/go/x/term/+/master:LICENSE) |
+
+The complete notices — including all transitive dependencies and the Go
+standard library — live in [`THIRD_PARTY_LICENSES.txt`](THIRD_PARTY_LICENSES.txt),
+ship inside every release archive, and are embedded in the binary itself:
+`scrapemychats --license` prints them.
+
+The Python scripts (Option B) have one dependency, [Playwright](https://github.com/microsoft/playwright-python)
+© Microsoft Corporation ([Apache-2.0](https://github.com/microsoft/playwright-python/blob/main/LICENSE)),
+which you install yourself via `pip` — it is not distributed with this
+repository.
+
 ## License
 
 MIT

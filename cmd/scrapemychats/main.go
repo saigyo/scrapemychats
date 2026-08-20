@@ -22,6 +22,7 @@ import (
 	"github.com/gofrs/flock"
 	"golang.org/x/term"
 
+	"github.com/saigyo/scrapemychats"
 	"github.com/saigyo/scrapemychats/internal/browser"
 	"github.com/saigyo/scrapemychats/internal/export"
 	"github.com/saigyo/scrapemychats/internal/viewer"
@@ -48,6 +49,7 @@ type options struct {
 	viewerTitle string
 	noPause     bool
 	showVersion bool
+	showLicense bool
 }
 
 // registerFlags declares every flag on fs and returns the options they write
@@ -67,6 +69,7 @@ func registerFlags(fs *flag.FlagSet) *options {
 	fs.StringVar(&o.viewerTitle, "viewer-title", "The Chat Archive", "title shown in the viewer")
 	fs.BoolVar(&o.noPause, "no-pause", false, "don't wait for Enter before closing (also auto-skipped when not a terminal)")
 	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
+	fs.BoolVar(&o.showLicense, "license", false, "print third-party license information and exit")
 	return o
 }
 
@@ -84,9 +87,14 @@ func run(args []string) int {
 		return 2
 	}
 
-	// --version: print and exit before anything else (no pause, no browser).
+	// --version / --license: print and exit before anything else (no pause,
+	// no browser).
 	if o.showVersion {
 		fmt.Println("scrapemychats " + version)
+		return 0
+	}
+	if o.showLicense {
+		fmt.Print(scrapemychats.ThirdPartyLicenses)
 		return 0
 	}
 
