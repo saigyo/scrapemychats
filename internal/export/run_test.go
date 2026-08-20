@@ -121,8 +121,8 @@ func (c *fakeFilesClient) GetBinary(u string) (int, []byte, string, error) {
 	return 200, []byte("x"), "application/octet-stream", nil
 }
 
-func (c *fakeFilesClient) GetBinaryInPage(u string, h map[string]string) (int, []byte, error) {
-	return 200, []byte("x"), nil
+func (c *fakeFilesClient) GetBinaryInPage(u string, h map[string]string) (int, []byte, string, error) {
+	return 200, []byte("x"), "application/octet-stream", nil
 }
 
 // cancelDownloadClient simulates Ctrl+C arriving while a chat's files are

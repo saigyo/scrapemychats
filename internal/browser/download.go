@@ -1,13 +1,16 @@
 package browser
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 )
 
@@ -27,18 +30,20 @@ func DefaultDownloadClient() *http.Client {
 	return &http.Client{Timeout: 5 * time.Minute}
 }
 
-// GetBinary performs an out-of-page GET of a pre-signed download URL and
-// returns the raw bytes, HTTP status and Content-Type. Port of Python's
+// GetBinary performs an out-of-page GET of a download URL and returns the
+// raw bytes, HTTP status and Content-Type. Port of Python's
 // context.request.get(dl_url) (export_chats.py:427, 593).
 //
-// It deliberately does NOT run inside the page and carries no cookies or
-// Authorization header: the download URLs ChatGPT hands back are pre-signed,
-// i.e. the access grant is baked into the query-string signature, so adding
-// session credentials is unnecessary and would in some cases be rejected. A
-// realistic browser User-Agent is the only header that matters. The
-// *http.Client is injectable so tests can point it at an httptest.Server;
-// nil selects DefaultDownloadClient.
-func GetBinary(client *http.Client, rawURL string) (status int, body []byte, contentType string, err error) {
+// Playwright's context.request carries the browser context's COOKIES on such
+// requests, and ChatGPT's file hosts actually require them — despite the
+// download URLs being pre-signed, a cookie-less fetch is rejected with 403
+// (observed live 2026-08: every attachment download failed until the session
+// cookies were attached). Callers therefore pass the session's cookies (and
+// its real User-Agent) via headers; see files.sessionClient.GetBinary. A nil
+// or UA-less headers map falls back to a realistic desktop-Chrome User-Agent.
+// The *http.Client is injectable so tests can point it at an
+// httptest.Server; nil selects DefaultDownloadClient.
+func GetBinary(client *http.Client, rawURL string, headers map[string]string) (status int, body []byte, contentType string, err error) {
 	if client == nil {
 		client = DefaultDownloadClient()
 	}
@@ -47,6 +52,9 @@ func GetBinary(client *http.Client, rawURL string) (status int, body []byte, con
 		return 0, nil, "", fmt.Errorf("browser: building download request for %s: %w", rawURL, err)
 	}
 	req.Header.Set("User-Agent", downloadUserAgent)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, "", fmt.Errorf("browser: downloading %s: %w", rawURL, err)
@@ -131,55 +139,87 @@ func binExpr(apiURL string, headers map[string]string) (string, error) {
             for (let i = 0; i < bytes.length; i += chunk) {
                 bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
             }
-            return {status: r.status, body: btoa(bin)};
+            return {status: r.status, body: btoa(bin),
+                    contentType: r.headers.get('content-type') || ''};
         })(` + string(arg) + `)`, nil
 }
 
-// binaryResult is the {status, body} object binExpr returns; body is the
-// base64 text of the response bytes (nil when the fetch produced no body).
+// binaryResult is the {status, body, contentType} object binExpr returns;
+// body is the base64 text of the response bytes (nil when the fetch produced
+// no body).
 type binaryResult struct {
-	Status int     `json:"status"`
-	Body   *string `json:"body"`
+	Status      int     `json:"status"`
+	Body        *string `json:"body"`
+	ContentType string  `json:"contentType"`
 }
 
 // parseBinaryResult decodes the raw JSON value produced by binExpr, base64-
 // decoding the body back into the original bytes.
-func parseBinaryResult(raw []byte) (status int, body []byte, err error) {
+func parseBinaryResult(raw []byte) (status int, body []byte, contentType string, err error) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return 0, nil, fmt.Errorf("browser: in-page binary fetch returned no result")
+		return 0, nil, "", fmt.Errorf("browser: in-page binary fetch returned no result")
 	}
 	var res binaryResult
 	if err := json.Unmarshal(raw, &res); err != nil {
-		return 0, nil, fmt.Errorf("browser: unparseable in-page binary result %q: %w", raw, err)
+		return 0, nil, "", fmt.Errorf("browser: unparseable in-page binary result %q: %w", raw, err)
 	}
 	if res.Body == nil {
-		return res.Status, nil, nil
+		return res.Status, nil, res.ContentType, nil
 	}
 	data, err := base64.StdEncoding.DecodeString(*res.Body)
 	if err != nil {
-		return res.Status, nil, fmt.Errorf("browser: decoding in-page binary body: %w", err)
+		return res.Status, nil, res.ContentType, fmt.Errorf("browser: decoding in-page binary body: %w", err)
 	}
-	return res.Status, data, nil
+	return res.Status, data, res.ContentType, nil
 }
 
 // GetBinaryInPage fetches a URL from inside the page and returns the raw
-// bytes. It is the 403 fallback for GetBinary: some file classes may only be
-// reachable with the browsing session's cookies, which an out-of-page GET
-// lacks.
-//
-// For the pre-signed download URLs ChatGPT actually returns this path is
-// expected to be dead code — the signature already authorizes the fetch, so
-// GetBinary succeeds — but it is kept because a URL that is NOT pre-signed
-// (e.g. a same-origin backend route) needs the session context an in-page
-// fetch provides.
-func GetBinaryInPage(s *Session, apiURL string, headers map[string]string) (int, []byte, error) {
+// bytes and Content-Type. It is the 403 fallback for GetBinary: a URL whose
+// host rejects even the cookie-carrying out-of-page GET (e.g. TLS-fingerprint
+// checks) can still be reachable through the real browser's network stack,
+// which an in-page fetch uses. Cross-origin file hosts must grant CORS for
+// this to work; same-origin backend routes always do.
+func GetBinaryInPage(s *Session, apiURL string, headers map[string]string) (int, []byte, string, error) {
 	expr, err := binExpr(apiURL, headers)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, "", err
 	}
 	var raw []byte
 	if err := chromedp.Run(s.ctx, chromedp.Evaluate(expr, &raw, awaitPromise)); err != nil {
-		return 0, nil, fmt.Errorf("browser: in-page binary fetch of %s: %w", apiURL, err)
+		return 0, nil, "", fmt.Errorf("browser: in-page binary fetch of %s: %w", apiURL, err)
 	}
 	return parseBinaryResult(raw)
+}
+
+// CookieHeaderFor returns the Cookie header value ("name=value; ...") the
+// browser would send to rawURL, read live from the session via CDP so
+// rotating tokens (Cloudflare clearance, session refresh) are always
+// current. An empty string with nil error means the browser has no cookies
+// for that URL.
+func (s *Session) CookieHeaderFor(rawURL string) (string, error) {
+	var cookies []*network.Cookie
+	err := chromedp.Run(s.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		var e error
+		cookies, e = network.GetCookies().WithURLs([]string{rawURL}).Do(ctx)
+		return e
+	}))
+	if err != nil {
+		return "", fmt.Errorf("browser: reading cookies for %s: %w", rawURL, err)
+	}
+	parts := make([]string, 0, len(cookies))
+	for _, c := range cookies {
+		parts = append(parts, c.Name+"="+c.Value)
+	}
+	return strings.Join(parts, "; "), nil
+}
+
+// UserAgent returns the browser's real User-Agent string (cached after the
+// first call), so out-of-page downloads present exactly the identity the
+// cookies were issued to. An empty string means the lookup failed; callers
+// then fall back to GetBinary's built-in desktop-Chrome UA.
+func (s *Session) UserAgent() string {
+	s.uaOnce.Do(func() {
+		_ = chromedp.Run(s.ctx, chromedp.Evaluate("navigator.userAgent", &s.ua))
+	})
+	return s.ua
 }

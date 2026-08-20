@@ -90,7 +90,7 @@ func TestGetBinaryReturnsBytesStatusAndType(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	status, body, ctype, err := GetBinary(srv.Client(), srv.URL+"/blob?sig=xyz")
+	status, body, ctype, err := GetBinary(srv.Client(), srv.URL+"/blob?sig=xyz", nil)
 	if err != nil {
 		t.Fatalf("GetBinary: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestGetBinaryPropagatesNon200(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	status, body, _, err := GetBinary(srv.Client(), srv.URL)
+	status, body, _, err := GetBinary(srv.Client(), srv.URL, nil)
 	if err != nil {
 		t.Fatalf("GetBinary: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestGetBinaryTransportError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	url := srv.URL
 	srv.Close()
-	if _, _, _, err := GetBinary(srv.Client(), url); err == nil {
+	if _, _, _, err := GetBinary(srv.Client(), url, nil); err == nil {
 		t.Fatal("expected a transport error from a closed server")
 	}
 }
@@ -145,7 +145,8 @@ func TestBinExprShapeAndRoundTrip(t *testing.T) {
 	for _, want := range []string{
 		"await r.arrayBuffer()",
 		"btoa(bin)",
-		"return {status: r.status, body: btoa(bin)};",
+		"return {status: r.status, body: btoa(bin),",
+		"contentType: r.headers.get('content-type') || ''};",
 	} {
 		if !strings.Contains(expr, want) {
 			t.Errorf("expression missing %q:\n%s", want, expr)
@@ -156,13 +157,13 @@ func TestBinExprShapeAndRoundTrip(t *testing.T) {
 	// reconstructs the exact bytes.
 	payload := []byte{0x00, 0x10, 0xff, 0x42}
 	b64 := base64.StdEncoding.EncodeToString(payload)
-	raw, _ := json.Marshal(binaryResult{Status: 200, Body: &b64})
-	status, data, err := parseBinaryResult(raw)
+	raw, _ := json.Marshal(binaryResult{Status: 200, Body: &b64, ContentType: "image/png"})
+	status, data, ctype, err := parseBinaryResult(raw)
 	if err != nil {
 		t.Fatalf("parseBinaryResult: %v", err)
 	}
-	if status != 200 || string(data) != string(payload) {
-		t.Errorf("got (%d, %v), want (200, %v)", status, data, payload)
+	if status != 200 || string(data) != string(payload) || ctype != "image/png" {
+		t.Errorf("got (%d, %v, %q), want (200, %v, %q)", status, data, ctype, payload, "image/png")
 	}
 }
 
@@ -181,7 +182,7 @@ func TestParseBinaryResult(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			status, body, err := parseBinaryResult([]byte(tt.raw))
+			status, body, _, err := parseBinaryResult([]byte(tt.raw))
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected an error, got status=%d body=%v", status, body)

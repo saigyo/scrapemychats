@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
@@ -112,6 +113,10 @@ type Session struct {
 	cancels    []context.CancelFunc
 	ExecPath   string
 	ProfileDir string
+
+	// ua caches the browser's navigator.userAgent (see UserAgent).
+	ua     string
+	uaOnce sync.Once
 }
 
 // Context returns the chromedp target context of the session's page. It is
