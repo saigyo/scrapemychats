@@ -64,10 +64,10 @@ type sessionClient struct {
 }
 
 // NewSessionClient wraps a live browser session so the download functions can
-// drive it. The out-of-page GetBinary path gets its own http.Client from
-// browser.DefaultDownloadClient.
+// drive it. The out-of-page GetBinary path gets the session's DownloadClient,
+// which re-selects cookies from the browser jar on every redirect hop.
 func NewSessionClient(s *browser.Session) Client {
-	return &sessionClient{s: s, http: browser.DefaultDownloadClient()}
+	return &sessionClient{s: s, http: s.DownloadClient()}
 }
 
 func (c *sessionClient) Fetch(u string, h map[string]string) (int, string, error) {
@@ -81,6 +81,8 @@ func (c *sessionClient) PostJSON(u string, h map[string]string, body any) (int, 
 func (c *sessionClient) GetBinary(u string) (int, []byte, string, error) {
 	// Send the browser's cookies and UA with the out-of-page GET, matching
 	// Playwright's context.request: ChatGPT's file hosts 403 without them.
+	// This sets the first hop's Cookie header; redirect hops re-select their
+	// own cookies via the session DownloadClient (see NewSessionClient).
 	// Cookie lookup failure is deliberately non-fatal — the fetch then runs
 	// bare and, if rejected, the caller's in-page fallback still applies.
 	headers := map[string]string{}

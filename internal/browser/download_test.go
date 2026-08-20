@@ -141,6 +141,62 @@ func TestGetBinaryHeaderHandling(t *testing.T) {
 	}
 }
 
+// TestDownloadClientRedirectCookieReselection: on a redirect, the Cookie
+// header must be re-selected for the hop's URL from the (simulated) browser
+// jar — neither net/http's copy-to-same-domain nor its strip-on-cross-domain
+// behavior matches a real browser.
+func TestDownloadClientRedirectCookieReselection(t *testing.T) {
+	var targetCookie, targetUA string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetCookie = r.Header.Get("Cookie")
+		targetUA = r.Header.Get("User-Agent")
+		w.WriteHeader(200)
+	}))
+	defer target.Close()
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/blob", http.StatusFound)
+	}))
+	defer origin.Close()
+
+	client := newDownloadClient(func(u string) (string, error) {
+		if strings.HasPrefix(u, target.URL) {
+			return "storage=tok2", nil
+		}
+		return "session=tok1", nil
+	})
+	status, _, _, err := GetBinary(client, origin.URL, map[string]string{
+		"Cookie": "session=tok1", "User-Agent": "RealBrowser/1.0",
+	})
+	if err != nil {
+		t.Fatalf("GetBinary: %v", err)
+	}
+	if status != 200 {
+		t.Errorf("status = %d, want 200", status)
+	}
+	if targetCookie != "storage=tok2" {
+		t.Errorf("redirect-hop Cookie = %q, want the target host's own cookies", targetCookie)
+	}
+	if targetUA != "RealBrowser/1.0" {
+		t.Errorf("redirect-hop UA = %q, want the original UA carried through", targetUA)
+	}
+}
+
+// TestDownloadClientRedirectCap: the custom CheckRedirect must re-impose
+// net/http's standard 10-hop limit it replaces.
+func TestDownloadClientRedirectCap(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, srv.URL+"/again", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	client := newDownloadClient(func(string) (string, error) { return "", nil })
+	_, _, _, err := GetBinary(client, srv.URL, nil)
+	if err == nil || !strings.Contains(err.Error(), "stopped after 10 redirects") {
+		t.Errorf("err = %v, want the 10-redirect cap", err)
+	}
+}
+
 func TestGetBinaryPropagatesNon200(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(403)
@@ -178,6 +234,7 @@ func TestBinExprShapeAndRoundTrip(t *testing.T) {
 	for _, want := range []string{
 		"await r.arrayBuffer()",
 		"btoa(bin)",
+		"fetch(url, {headers, credentials: 'include'})",
 		"return {status: r.status, body: btoa(bin),",
 		"contentType: r.headers.get('content-type') || ''};",
 	} {
