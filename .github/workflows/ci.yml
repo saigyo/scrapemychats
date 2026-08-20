@@ -39,18 +39,23 @@ jobs:
         run: go vet ./...
 
       # Verifies every module linked into the release binaries carries an
-      # allow-listed license (see lichen.yaml). THIRD_PARTY_LICENSES.txt
-      # freshness is checked separately by tools/gen-licenses's
-      # TestGeneratedFileUpToDate in the `go test` step below.
+      # allow-listed license (see lichen.yaml), across the full GOOS/GOARCH
+      # release matrix from .goreleaser.yaml (build tags can change the
+      # linked module set per OS and per architecture).
+      # THIRD_PARTY_LICENSES.txt freshness is checked separately by
+      # tools/gen-licenses's TestGeneratedFileUpToDate in the `go test`
+      # step below.
       - name: License check (lichen)
         if: matrix.os == 'ubuntu-latest'
         run: |
           mkdir -p /tmp/lichen-bin
-          CGO_ENABLED=0 GOOS=linux   go build -o /tmp/lichen-bin/scrapemychats-linux   ./cmd/scrapemychats
-          CGO_ENABLED=0 GOOS=darwin  go build -o /tmp/lichen-bin/scrapemychats-darwin  ./cmd/scrapemychats
-          CGO_ENABLED=0 GOOS=windows go build -o /tmp/lichen-bin/scrapemychats-windows ./cmd/scrapemychats
-          go run github.com/uw-labs/lichen@v0.1.7 --config=lichen.yaml \
-            /tmp/lichen-bin/scrapemychats-linux /tmp/lichen-bin/scrapemychats-darwin /tmp/lichen-bin/scrapemychats-windows
+          for goos in linux darwin windows; do
+            for goarch in amd64 arm64; do
+              CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch \
+                go build -o "/tmp/lichen-bin/scrapemychats-$goos-$goarch" ./cmd/scrapemychats
+            done
+          done
+          go run github.com/uw-labs/lichen@v0.1.7 --config=lichen.yaml /tmp/lichen-bin/*
 
       # The gated live-browser test (internal/browser/live_test.go) self-skips
       # unless SCRAPEMYCHATS_LIVE_BROWSER is set, so it never runs in CI (no
