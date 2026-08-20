@@ -108,6 +108,39 @@ func TestGetBinaryReturnsBytesStatusAndType(t *testing.T) {
 	}
 }
 
+// TestGetBinaryHeaderHandling: caller headers are sent, an empty value never
+// blanks a header, and the default UA applies exactly when the caller sent no
+// non-empty User-Agent of their own.
+func TestGetBinaryHeaderHandling(t *testing.T) {
+	var gotUA, gotCookie string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		gotCookie = r.Header.Get("Cookie")
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	// Cookie + real UA pass through.
+	_, _, _, err := GetBinary(srv.Client(), srv.URL, map[string]string{
+		"Cookie": "session=abc", "User-Agent": "RealBrowser/1.0",
+	})
+	if err != nil {
+		t.Fatalf("GetBinary: %v", err)
+	}
+	if gotCookie != "session=abc" || gotUA != "RealBrowser/1.0" {
+		t.Errorf("got Cookie=%q UA=%q, want the caller's values", gotCookie, gotUA)
+	}
+
+	// An empty User-Agent value must not override the default UA.
+	_, _, _, err = GetBinary(srv.Client(), srv.URL, map[string]string{"User-Agent": ""})
+	if err != nil {
+		t.Fatalf("GetBinary: %v", err)
+	}
+	if gotUA != downloadUserAgent {
+		t.Errorf("User-Agent = %q, want the default UA when the caller's is empty", gotUA)
+	}
+}
+
 func TestGetBinaryPropagatesNon200(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(403)
