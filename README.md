@@ -333,18 +333,25 @@ affiliated with OpenAI.
 
 ## Third-party licenses
 
-The downloadable app (Option A) builds on these components (direct
-dependencies; everything is statically linked into the binary):
+The downloadable app (Option A) builds on these components (every Go
+module statically linked into the binary, direct and indirect):
 
 | Component | Use | License |
 |---|---|---|
 | [chromedp](https://github.com/chromedp/chromedp) © The chromedp Authors | Drives your Chrome/Edge over the DevTools protocol | [MIT](https://github.com/chromedp/chromedp/blob/master/LICENSE) |
 | [cdproto](https://github.com/chromedp/cdproto) © The chromedp Authors | DevTools protocol types used by chromedp | [MIT](https://github.com/chromedp/cdproto/blob/master/LICENSE) |
+| [sysutil](https://github.com/chromedp/sysutil) © Kenneth Shaw | OS details chromedp needs to find/run the browser | [MIT](https://github.com/chromedp/sysutil/blob/master/LICENSE) |
+| [go-json-experiment/json](https://github.com/go-json-experiment/json) © The Go Authors | JSON encoding used by cdproto | [BSD-3-Clause](https://github.com/go-json-experiment/json/blob/master/LICENSE) |
+| [gobwas/ws](https://github.com/gobwas/ws) © Sergey Kamardin | WebSocket transport of the DevTools connection | [MIT](https://github.com/gobwas/ws/blob/master/LICENSE) |
+| [gobwas/httphead](https://github.com/gobwas/httphead) © Sergey Kamardin | HTTP header parsing for the WebSocket handshake | [MIT](https://github.com/gobwas/httphead/blob/master/LICENSE) |
+| [gobwas/pool](https://github.com/gobwas/pool) © Sergey Kamardin | Buffer pooling for the WebSocket transport | [MIT](https://github.com/gobwas/pool/blob/master/LICENSE) |
 | [flock](https://github.com/gofrs/flock) © Tim Heckman, The Gofrs | Lock file so a second launch can't clobber a running export | [BSD-3-Clause](https://github.com/gofrs/flock/blob/main/LICENSE) |
 | [golang.org/x/term](https://pkg.go.dev/golang.org/x/term) © The Go Authors | Detects whether output is a terminal (for the exit pause) | [BSD-3-Clause](https://cs.opensource.google/go/x/term/+/master:LICENSE) |
+| [golang.org/x/sys](https://pkg.go.dev/golang.org/x/sys) © The Go Authors | Low-level OS calls backing x/term and chromedp | [BSD-3-Clause](https://cs.opensource.google/go/x/sys/+/master:LICENSE) |
+| [Go standard library](https://go.dev) © The Go Authors | Everything else — HTTP, JSON, CSV, crypto, runtime | [BSD-3-Clause](https://go.dev/LICENSE) |
 
-The complete notices — including all transitive dependencies and the Go
-standard library — live in [`THIRD_PARTY_LICENSES.txt`](THIRD_PARTY_LICENSES.txt),
+The complete license and notice texts for all of the above live in
+[`THIRD_PARTY_LICENSES.txt`](THIRD_PARTY_LICENSES.txt),
 ship inside every release archive, and are embedded in the binary itself:
 `scrapemychats --license` prints them.
 
