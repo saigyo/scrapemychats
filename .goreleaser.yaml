@@ -62,6 +62,7 @@ archives:
     files:
       - README.md
       - LICENSE
+      - THIRD_PARTY_LICENSES.txt
       - categories.example.json
 
 checksum:
