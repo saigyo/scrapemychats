@@ -25,12 +25,16 @@ import (
 const downloadUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
 	"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
+// downloadTimeout caps a single file download, out-of-page and in-page
+// alike, so a stuck connection or a host that never finishes its response
+// cannot hang the whole export.
+const downloadTimeout = 5 * time.Minute
+
 // DefaultDownloadClient returns the *http.Client GetBinary uses when the
 // caller passes nil. It follows redirects (pre-signed URLs frequently 302 to
-// a storage host) and caps a single download so a stuck connection cannot
-// hang the whole export.
+// a storage host) and caps a single download (downloadTimeout).
 func DefaultDownloadClient() *http.Client {
-	return &http.Client{Timeout: 5 * time.Minute}
+	return &http.Client{Timeout: downloadTimeout}
 }
 
 // GetBinary performs an out-of-page GET of a download URL and returns the
@@ -196,8 +200,14 @@ func GetBinaryInPage(s *Session, apiURL string, headers map[string]string) (int,
 	if err != nil {
 		return 0, nil, "", err
 	}
+	// Bound the in-page fetch like the out-of-page path: fetch() has no
+	// built-in timeout and the session context lives for the whole export,
+	// so an unbounded Evaluate on a stalled host would hang everything
+	// (same fix as the capture re-fetch, internal/browser/capture.go).
+	fetchCtx, cancel := context.WithTimeout(s.ctx, downloadTimeout)
+	defer cancel()
 	var raw []byte
-	if err := chromedp.Run(s.ctx, chromedp.Evaluate(expr, &raw, awaitPromise)); err != nil {
+	if err := chromedp.Run(fetchCtx, chromedp.Evaluate(expr, &raw, awaitPromise)); err != nil {
 		return 0, nil, "", fmt.Errorf("browser: in-page binary fetch of %s: %w", apiURL, err)
 	}
 	return parseBinaryResult(raw)
