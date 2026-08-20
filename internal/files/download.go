@@ -155,10 +155,12 @@ func downloadURLOf(status int, body string) (string, error) {
 
 // getBinaryWithFallback fetches dlURL out-of-page and, when the host rejects
 // that request with 401/403, retries once from inside the page (the real
-// browser's network stack — cookies, TLS fingerprint and all). It returns the
-// final status/bytes/Content-Type plus a note describing a failed fallback,
-// which callers append to their "download HTTP" error message so errors.log
-// shows both attempts.
+// browser's network stack — cookies, TLS fingerprint and all). On success —
+// of either attempt — it returns that attempt's status/bytes/Content-Type.
+// When the fallback fails too, it returns the FIRST attempt's values (the
+// fallback response is never surfaced through them) and describes the retry
+// outcome in note, which callers append to their "download HTTP" error
+// message so errors.log shows both attempts.
 func getBinaryWithFallback(c Client, dlURL string) (status int, data []byte, ctype, note string, err error) {
 	status, data, ctype, err = c.GetBinary(dlURL)
 	if err != nil || (status != 401 && status != 403) {
