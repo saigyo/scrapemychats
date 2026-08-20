@@ -14,11 +14,14 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// downloadUserAgent is the User-Agent sent with out-of-page binary GETs. It
-// mimics a current desktop Chrome so a pre-signed blob host that sniffs the
-// UA (some CDNs 403 an empty or obviously-automated agent) sees an ordinary
-// browser. It does not need to match the live browser's UA exactly: the
-// request is not session-authenticated (see GetBinary).
+// downloadUserAgent is the FALLBACK User-Agent for out-of-page binary GETs,
+// used only when the caller supplies no non-empty UA of its own — normally
+// the session's real navigator.userAgent rides along with the session
+// cookies (see Session.UserAgent and files.sessionClient.GetBinary), because
+// ChatGPT's file hosts session-authenticate downloads and a UA that doesn't
+// match the cookies' owner is one more anomaly to trip on. This constant
+// merely keeps a bare fetch looking like an ordinary desktop Chrome when the
+// live UA lookup fails.
 const downloadUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
 	"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
@@ -126,6 +129,9 @@ func PostJSON(s *Session, apiURL string, headers map[string]string, body any) (i
 // body base64-encoded, so arbitrary binary bytes survive the JSON round trip
 // out of the page. The bytes are chunked through String.fromCharCode.apply
 // (a single apply of a multi-megabyte array overflows the JS argument stack).
+// credentials:'include' sends cookies on cross-origin fetches too — fetch's
+// default same-origin mode would strip them for a cookie-gated file host,
+// which is the very case this fallback exists for.
 func binExpr(apiURL string, headers map[string]string) (string, error) {
 	if headers == nil {
 		headers = map[string]string{}
@@ -138,7 +144,7 @@ func binExpr(apiURL string, headers map[string]string) (string, error) {
 		return "", fmt.Errorf("browser: encoding binary-fetch arguments: %w", err)
 	}
 	return `(async ({url, headers}) => {
-            const r = await fetch(url, {headers});
+            const r = await fetch(url, {headers, credentials: 'include'});
             const bytes = new Uint8Array(await r.arrayBuffer());
             let bin = '';
             const chunk = 0x8000;
@@ -195,6 +201,41 @@ func GetBinaryInPage(s *Session, apiURL string, headers map[string]string) (int,
 		return 0, nil, "", fmt.Errorf("browser: in-page binary fetch of %s: %w", apiURL, err)
 	}
 	return parseBinaryResult(raw)
+}
+
+// newDownloadClient returns a DefaultDownloadClient whose redirect handling
+// re-selects the Cookie header per hop via lookup. net/http's own redirect
+// logic merely copies the original Cookie header to same-domain hops (even
+// when a cookie is host-only or path-scoped) and strips it on cross-domain
+// ones — both over- and under-sending compared to a real browser jar, which
+// re-evaluates the applicable cookies for every URL. A nil-error empty
+// lookup result sends no Cookie header at all on that hop.
+func newDownloadClient(lookup func(rawURL string) (string, error)) *http.Client {
+	c := DefaultDownloadClient()
+	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		// A custom CheckRedirect replaces net/http's built-in hop cap, so
+		// re-impose the standard limit of 10.
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
+		req.Header.Del("Cookie")
+		if lookup != nil {
+			if ck, err := lookup(req.URL.String()); err == nil && ck != "" {
+				req.Header.Set("Cookie", ck)
+			}
+		}
+		return nil
+	}
+	return c
+}
+
+// DownloadClient returns the *http.Client the session's out-of-page
+// downloads should use: DefaultDownloadClient plus per-redirect Cookie
+// re-selection from the live browser jar (see newDownloadClient), so a
+// pre-signed URL that 302s to a storage host gets exactly the cookies the
+// browser would send there.
+func (s *Session) DownloadClient() *http.Client {
+	return newDownloadClient(s.CookieHeaderFor)
 }
 
 // CookieHeaderFor returns the Cookie header value ("name=value; ...") the
