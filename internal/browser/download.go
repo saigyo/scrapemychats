@@ -51,9 +51,15 @@ func GetBinary(client *http.Client, rawURL string, headers map[string]string) (s
 	if err != nil {
 		return 0, nil, "", fmt.Errorf("browser: building download request for %s: %w", rawURL, err)
 	}
-	req.Header.Set("User-Agent", downloadUserAgent)
+	// Empty values are skipped so a caller whose UA/cookie lookup came up
+	// empty cannot blank out a header; the default UA then still applies.
 	for k, v := range headers {
-		req.Header.Set(k, v)
+		if v != "" {
+			req.Header.Set(k, v)
+		}
+	}
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", downloadUserAgent)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
