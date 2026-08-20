@@ -338,8 +338,8 @@ module statically linked into the binary, direct and indirect):
 
 | Component | Use | License |
 |---|---|---|
-| [chromedp](https://github.com/chromedp/chromedp) © The chromedp Authors | Drives your Chrome/Edge over the DevTools protocol | [MIT](https://github.com/chromedp/chromedp/blob/master/LICENSE) |
-| [cdproto](https://github.com/chromedp/cdproto) © The chromedp Authors | DevTools protocol types used by chromedp | [MIT](https://github.com/chromedp/cdproto/blob/master/LICENSE) |
+| [chromedp](https://github.com/chromedp/chromedp) © Kenneth Shaw | Drives your Chrome/Edge over the DevTools protocol | [MIT](https://github.com/chromedp/chromedp/blob/master/LICENSE) |
+| [cdproto](https://github.com/chromedp/cdproto) © Kenneth Shaw | DevTools protocol types used by chromedp | [MIT](https://github.com/chromedp/cdproto/blob/master/LICENSE) |
 | [sysutil](https://github.com/chromedp/sysutil) © Kenneth Shaw | OS details chromedp needs to find/run the browser | [MIT](https://github.com/chromedp/sysutil/blob/master/LICENSE) |
 | [go-json-experiment/json](https://github.com/go-json-experiment/json) © The Go Authors | JSON encoding used by cdproto | [BSD-3-Clause](https://github.com/go-json-experiment/json/blob/master/LICENSE) |
 | [gobwas/ws](https://github.com/gobwas/ws) © Sergey Kamardin | WebSocket transport of the DevTools connection | [MIT](https://github.com/gobwas/ws/blob/master/LICENSE) |

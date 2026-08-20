@@ -3,8 +3,10 @@ package main
 import (
 	"flag"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/saigyo/scrapemychats"
 	"github.com/saigyo/scrapemychats/internal/browser"
 )
 
@@ -98,7 +100,7 @@ func TestFlagDefaults(t *testing.T) {
 	if o.viewerTitle != "The Chat Archive" {
 		t.Errorf("viewer-title default = %q, want %q", o.viewerTitle, "The Chat Archive")
 	}
-	if o.rediscover || o.fixFiles || o.viewerOnly || o.noPause || o.showVersion {
+	if o.rediscover || o.fixFiles || o.viewerOnly || o.noPause || o.showVersion || o.showLicense {
 		t.Errorf("bool flags should default false: %+v", o)
 	}
 }
@@ -119,6 +121,30 @@ func TestVersionFlag(t *testing.T) {
 	// The default build stamp is "dev"; a release overrides it via ldflags.
 	if version == "" {
 		t.Error("version var should never be empty")
+	}
+}
+
+func TestLicenseFlag(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	o := registerFlags(fs)
+	if err := fs.Parse([]string{"--license"}); err != nil {
+		t.Fatal(err)
+	}
+	if !o.showLicense {
+		t.Error("--license should set showLicense")
+	}
+	// run(["--license"]) must exit 0 without touching the browser.
+	if code := run([]string{"--license"}); code != 0 {
+		t.Errorf("run(--license) = %d, want 0", code)
+	}
+	// The embedded notices must be present and look like the generated file
+	// (tools/gen-licenses guarantees the preamble; its freshness gate keeps
+	// the content in sync with the dependency graph).
+	if !strings.HasPrefix(scrapemychats.ThirdPartyLicenses, "Third-party licenses for scrapemychats") {
+		t.Errorf("embedded notices should start with the generated preamble, got %.60q", scrapemychats.ThirdPartyLicenses)
+	}
+	if !strings.Contains(scrapemychats.ThirdPartyLicenses, "github.com/chromedp/chromedp") {
+		t.Error("embedded notices should cover the chromedp dependency")
 	}
 }
 
