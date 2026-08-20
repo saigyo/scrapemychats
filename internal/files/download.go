@@ -30,17 +30,19 @@ import (
 //     metadata endpoints that return JSON with a download_url.
 //   - PostJSON is an in-page session-authenticated POST, used for the Library
 //     listing.
-//   - GetBinary is an out-of-page GET of a pre-signed URL returning raw bytes.
-//   - GetBinaryInPage is an in-page fetch of the bytes, available as a fallback
-//     for a URL that needs the browsing session (cookies) rather than a
-//     pre-signed signature. The current download paths only ever hit
-//     pre-signed URLs, so this is not wired in — matching the Python, which
-//     likewise has no in-page download fallback (see browser.GetBinaryInPage).
+//   - GetBinary is an out-of-page GET of a download URL returning raw bytes.
+//     The session implementation attaches the browser's cookies and
+//     User-Agent: ChatGPT's file hosts reject cookie-less fetches with 403
+//     even though the URLs are pre-signed (Playwright's context.request,
+//     which the Python tool uses, always carried them).
+//   - GetBinaryInPage is an in-page fetch of the bytes, used as the fallback
+//     when the out-of-page GET still comes back 401/403 (e.g. a host that
+//     also checks the TLS fingerprint, which only the real browser has).
 type Client interface {
 	Fetch(url string, headers map[string]string) (status int, body string, err error)
 	PostJSON(url string, headers map[string]string, body any) (status int, body2 string, err error)
 	GetBinary(url string) (status int, data []byte, contentType string, err error)
-	GetBinaryInPage(url string, headers map[string]string) (status int, data []byte, err error)
+	GetBinaryInPage(url string, headers map[string]string) (status int, data []byte, contentType string, err error)
 }
 
 // sleep is time.Sleep behind a package variable so tests run the download
@@ -54,8 +56,8 @@ func delay(minS, maxS float64) {
 }
 
 // sessionClient adapts a *browser.Session to Client. It owns one
-// *http.Client for the out-of-page GetBinary path; the download URLs are
-// pre-signed, so that client carries no session/cookies (see browser.GetBinary).
+// *http.Client for the out-of-page GetBinary path; the session cookies that
+// path needs are read fresh from the browser per request (see GetBinary).
 type sessionClient struct {
 	s    *browser.Session
 	http *http.Client
@@ -77,10 +79,21 @@ func (c *sessionClient) PostJSON(u string, h map[string]string, body any) (int, 
 }
 
 func (c *sessionClient) GetBinary(u string) (int, []byte, string, error) {
-	return browser.GetBinary(c.http, u)
+	// Send the browser's cookies and UA with the out-of-page GET, matching
+	// Playwright's context.request: ChatGPT's file hosts 403 without them.
+	// Cookie lookup failure is deliberately non-fatal — the fetch then runs
+	// bare and, if rejected, the caller's in-page fallback still applies.
+	headers := map[string]string{}
+	if ck, err := c.s.CookieHeaderFor(u); err == nil && ck != "" {
+		headers["Cookie"] = ck
+	}
+	if ua := c.s.UserAgent(); ua != "" {
+		headers["User-Agent"] = ua
+	}
+	return browser.GetBinary(c.http, u, headers)
 }
 
-func (c *sessionClient) GetBinaryInPage(u string, h map[string]string) (int, []byte, error) {
+func (c *sessionClient) GetBinaryInPage(u string, h map[string]string) (int, []byte, string, error) {
 	return browser.GetBinaryInPage(c.s, u, h)
 }
 
@@ -138,23 +151,45 @@ func downloadURLOf(status int, body string) (string, error) {
 	return s, nil
 }
 
-// SaveDownloadURL fetches a pre-signed URL and writes it under filesDir. Port
-// of save_download_url (export_chats.py:426-436).
+// getBinaryWithFallback fetches dlURL out-of-page and, when the host rejects
+// that request with 401/403, retries once from inside the page (the real
+// browser's network stack — cookies, TLS fingerprint and all). It returns the
+// final status/bytes/Content-Type plus a note describing a failed fallback,
+// which callers append to their "download HTTP" error message so errors.log
+// shows both attempts.
+func getBinaryWithFallback(c Client, dlURL string) (status int, data []byte, ctype, note string, err error) {
+	status, data, ctype, err = c.GetBinary(dlURL)
+	if err != nil || (status != 401 && status != 403) {
+		return status, data, ctype, "", err
+	}
+	st2, d2, ct2, e2 := c.GetBinaryInPage(dlURL, nil)
+	if e2 != nil {
+		return status, data, ctype, fmt.Sprintf(" (in-page retry failed: %v)", e2), nil
+	}
+	if st2 == 200 {
+		return st2, d2, ct2, "", nil
+	}
+	return status, data, ctype, fmt.Sprintf(" (in-page retry HTTP %d)", st2), nil
+}
+
+// SaveDownloadURL fetches a download URL and writes it under filesDir. Port
+// of save_download_url (export_chats.py:426-436), plus the in-page 403
+// fallback (see getBinaryWithFallback).
 //
 // On any failure it reports via err and returns false; success returns true.
 // The label prefixes the error message, and — matching the shape of Python's
 // callers, whose surrounding try/except emits "{label}: {e}" — a transport or
 // write error is reported as "{label}: {error}", while a non-200 download is
-// "{label}: download HTTP {status}", exactly the message save_download_url
-// itself produces.
+// "{label}: download HTTP {status}", the message save_download_url itself
+// produces (with a trailing in-page-retry note when the fallback ran too).
 func SaveDownloadURL(c Client, dlURL, filesDir, name, label string, err func(string)) bool {
-	status, data, _, e := c.GetBinary(dlURL)
+	status, data, _, note, e := getBinaryWithFallback(c, dlURL)
 	if e != nil {
 		err(fmt.Sprintf("%s: %v", label, e))
 		return false
 	}
 	if status != 200 {
-		err(fmt.Sprintf("%s: download HTTP %d", label, status))
+		err(fmt.Sprintf("%s: download HTTP %d%s", label, status, note))
 		return false
 	}
 	if e := os.MkdirAll(filesDir, 0o755); e != nil {
@@ -467,13 +502,13 @@ func downloadOneFile(c Client, ref FileRef, filesDir string, auth map[string]str
 		return false, false // Python `continue` skips the sleep
 	}
 
-	status, data, ctype, e := c.GetBinary(dlURL)
+	status, data, ctype, note, e := getBinaryWithFallback(c, dlURL)
 	if e != nil {
 		err(fmt.Sprintf("file %s (%s): %v", fid, name, e))
 		return false, true // exception path
 	}
 	if status != 200 {
-		err(fmt.Sprintf("file %s (%s): download HTTP %d", fid, name, status))
+		err(fmt.Sprintf("file %s (%s): download HTTP %d%s", fid, name, status, note))
 		return false, false // Python `continue` skips the sleep
 	}
 

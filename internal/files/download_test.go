@@ -35,11 +35,12 @@ type fakeClient struct {
 	fetch    func(u string, h map[string]string) (int, string, error)
 	postJSON func(u string, h map[string]string, body any) (int, string, error)
 	getBin   func(u string) (int, []byte, string, error)
-	getBinIP func(u string, h map[string]string) (int, []byte, error)
+	getBinIP func(u string, h map[string]string) (int, []byte, string, error)
 
-	fetchURLs  []string
-	postBodies []any
-	getBinURLs []string
+	fetchURLs    []string
+	postBodies   []any
+	getBinURLs   []string
+	getBinIPURLs []string
 }
 
 func (f *fakeClient) Fetch(u string, h map[string]string) (int, string, error) {
@@ -66,9 +67,10 @@ func (f *fakeClient) GetBinary(u string) (int, []byte, string, error) {
 	return f.getBin(u)
 }
 
-func (f *fakeClient) GetBinaryInPage(u string, h map[string]string) (int, []byte, error) {
+func (f *fakeClient) GetBinaryInPage(u string, h map[string]string) (int, []byte, string, error) {
+	f.getBinIPURLs = append(f.getBinIPURLs, u)
 	if f.getBinIP == nil {
-		return 0, nil, fmt.Errorf("fakeClient.GetBinaryInPage not scripted (url=%s)", u)
+		return 0, nil, "", fmt.Errorf("fakeClient.GetBinaryInPage not scripted (url=%s)", u)
 	}
 	return f.getBinIP(u, h)
 }
@@ -113,17 +115,70 @@ func TestSaveDownloadURLSuccess(t *testing.T) {
 func TestSaveDownloadURLHTTPError(t *testing.T) {
 	noSleep(t)
 	dir := t.TempDir()
-	c := &fakeClient{getBin: func(string) (int, []byte, string, error) { return 403, []byte("no"), "", nil }}
+	// 404 does not trigger the in-page fallback, so the message is exactly
+	// the Python-shaped one.
+	c := &fakeClient{getBin: func(string) (int, []byte, string, error) { return 404, []byte("no"), "", nil }}
 	errFn, msgs := collectErr()
 
 	if SaveDownloadURL(c, "https://blob/x", dir, "f.txt", "sandbox /mnt/data/f.txt", errFn) {
-		t.Fatal("expected failure on HTTP 403")
+		t.Fatal("expected failure on HTTP 404")
 	}
-	if len(*msgs) != 1 || (*msgs)[0] != "sandbox /mnt/data/f.txt: download HTTP 403" {
-		t.Errorf("err = %v, want download HTTP 403 message", *msgs)
+	if len(*msgs) != 1 || (*msgs)[0] != "sandbox /mnt/data/f.txt: download HTTP 404" {
+		t.Errorf("err = %v, want download HTTP 404 message", *msgs)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Errorf("no file should have been written, found %d", len(entries))
+	}
+}
+
+// TestSaveDownloadURLInPageFallback: a 403 on the out-of-page GET must be
+// retried from inside the page, and a 200 there saves the file as if the
+// first attempt had succeeded (no error reported).
+func TestSaveDownloadURLInPageFallback(t *testing.T) {
+	noSleep(t)
+	dir := t.TempDir()
+	payload := []byte("cookie-gated bytes")
+	c := &fakeClient{
+		getBin: func(string) (int, []byte, string, error) { return 403, []byte("denied"), "", nil },
+		getBinIP: func(string, map[string]string) (int, []byte, string, error) {
+			return 200, payload, "image/png", nil
+		},
+	}
+	errFn, msgs := collectErr()
+
+	if !SaveDownloadURL(c, "https://blob/x", dir, "f.png", "file f", errFn) {
+		t.Fatalf("expected fallback success; errs=%v", *msgs)
+	}
+	if len(*msgs) != 0 {
+		t.Errorf("unexpected errors: %v", *msgs)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "f.png")); string(got) != string(payload) {
+		t.Errorf("content = %q, want %q", got, payload)
+	}
+	if len(c.getBinIPURLs) != 1 || c.getBinIPURLs[0] != "https://blob/x" {
+		t.Errorf("in-page fetch URLs = %v, want the download URL once", c.getBinIPURLs)
+	}
+}
+
+// TestSaveDownloadURLInPageFallbackAlsoFails: when the in-page retry is also
+// rejected, the error message reports both attempts.
+func TestSaveDownloadURLInPageFallbackAlsoFails(t *testing.T) {
+	noSleep(t)
+	dir := t.TempDir()
+	c := &fakeClient{
+		getBin: func(string) (int, []byte, string, error) { return 403, nil, "", nil },
+		getBinIP: func(string, map[string]string) (int, []byte, string, error) {
+			return 404, nil, "", nil
+		},
+	}
+	errFn, msgs := collectErr()
+
+	if SaveDownloadURL(c, "https://blob/x", dir, "f.txt", "file f", errFn) {
+		t.Fatal("expected failure when both attempts are rejected")
+	}
+	want := "file f: download HTTP 403 (in-page retry HTTP 404)"
+	if len(*msgs) != 1 || (*msgs)[0] != want {
+		t.Errorf("err = %v, want %q", *msgs, want)
 	}
 }
 
@@ -187,7 +242,7 @@ func TestSaveDownloadURLViaRealGetBinary(t *testing.T) {
 
 	client := srv.Client()
 	c := &fakeClient{getBin: func(u string) (int, []byte, string, error) {
-		return browser.GetBinary(client, u)
+		return browser.GetBinary(client, u, nil)
 	}}
 	dir := t.TempDir()
 	errFn, msgs := collectErr()
@@ -288,6 +343,29 @@ func TestDownloadFilesContentTypeExtensionGuessing(t *testing.T) {
 				t.Errorf("expected file noext%s: %v", tc.ext, err)
 			}
 		})
+	}
+}
+
+// TestDownloadFilesInPageFallback: when the out-of-page GET 403s, the file
+// is fetched from inside the page instead, and the in-page Content-Type
+// drives the same extension guessing as the direct path.
+func TestDownloadFilesInPageFallback(t *testing.T) {
+	noSleep(t)
+	dir := t.TempDir()
+	c := &fakeClient{
+		fetch:  func(string, map[string]string) (int, string, error) { return 200, metaBody("https://blob/f"), nil },
+		getBin: func(string) (int, []byte, string, error) { return 403, []byte("denied"), "", nil },
+		getBinIP: func(string, map[string]string) (int, []byte, string, error) {
+			return 200, []byte("img"), "image/png", nil
+		},
+	}
+	errFn, msgs := collectErr()
+	ok, failed := DownloadFiles(c, []FileRef{{ID: "file-12345678", Name: "noext"}}, dir, nil, errFn)
+	if ok != 1 || failed != 0 || len(*msgs) != 0 {
+		t.Fatalf("ok=%d failed=%d errs=%v; want clean fallback success", ok, failed, *msgs)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "noext.png")); err != nil || string(got) != "img" {
+		t.Errorf("expected noext.png with in-page bytes; err=%v got=%q", err, got)
 	}
 }
 
