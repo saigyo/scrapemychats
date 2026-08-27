@@ -194,12 +194,42 @@ func Export(ctx context.Context, b Browser, cfg Config) (Summary, error) {
 	fsutil.Log(fmt.Sprintf("%d chats to process", len(chats)))
 
 	client := b.Client()
-	exported, skipped, failedN := 0, 0, 0
+	exported, skipped, failedN, attempted := 0, 0, 0, 0
 	extraDelay := 0.0 // grows every time the server throttles us
 	var lastAuth map[string]string
 
 	summaryNow := func() Summary {
 		return Summary{Exported: exported, Skipped: skipped, Failed: failedN, ErrorsPath: errorsPath}
+	}
+
+	// pace applies the polite delay after a chat has been dealt with, whether
+	// it succeeded or failed. A failed chat costs the server exactly the same
+	// page navigation(s) as a successful one — more, in fact, once its
+	// captureWithRetry retries are counted — so it must be paced the same way.
+	// This is a deliberate divergence from export_chats.py:797-801, whose
+	// `if not data: ... continue` skips the trailing delay entirely on
+	// failure: a run where most chats fail would then hammer the account
+	// unthrottled, which is exactly what produced ChatGPT's "slow down" modal
+	// in the field when a broken endpoint failed all 42 chats.
+	//
+	// rlHits is the throttle count for the chat just handled; it grows the
+	// permanent slowdown (export_chats.py:834-841). The long breather keys off
+	// attempted, not exported: the server sees every attempt, not just the
+	// successful ones, so a run of mostly-failing chats must still take its
+	// breathers.
+	pace := func(rlHits int) error {
+		if rlHits > 0 {
+			extraDelay = math.Min(extraDelay+ExtraDelayPer429*float64(rlHits), ExtraDelayCap)
+			fsutil.Log(fmt.Sprintf("    pace slowed: +%.0fs per chat from now on", extraDelay))
+		}
+		if attempted%LongBreakEvery == 0 {
+			pause := uniform(LongBreakMin, LongBreakMax)
+			fsutil.Log(fmt.Sprintf("    taking a %ds breather after %d chats...", int(pause), attempted))
+			if err := sleep(ctx, seconds(pause)); err != nil {
+				return err
+			}
+		}
+		return sleep(ctx, seconds(uniform(DelayMin, DelayMax)+extraDelay))
 	}
 
 	for idx, chat := range chats {
@@ -216,6 +246,7 @@ func Export(ctx context.Context, b Browser, cfg Config) (Summary, error) {
 			skipped++
 			continue
 		}
+		attempted++ // counts chats we actually work on, for the long-breather cadence
 
 		title, url, cid := chat.Title, chat.URL, chat.ID
 		// err records a chat-scoped error, exactly as Python's per-chat err
@@ -237,6 +268,11 @@ func Export(ctx context.Context, b Browser, cfg Config) (Summary, error) {
 			failedN++
 			if err := writeManifestRow(manifest, []string{url, title, "", "failed", "0", "0", "0"}); err != nil {
 				return Summary{}, fmt.Errorf("export: writing manifest row: %w", err)
+			}
+			// Pace here too — see the pace closure's doc comment for why a
+			// failed chat is not exempt.
+			if err := pace(rlHits); err != nil {
+				return summaryNow(), err
 			}
 			continue
 		}
@@ -311,21 +347,7 @@ func Export(ctx context.Context, b Browser, cfg Config) (Summary, error) {
 		}
 		exported++
 
-		// Pacing after each exported chat (export_chats.py:834-841). rlHits (the
-		// throttle count for this chat) drives the permanent slowdown; the
-		// accumulated extraDelay persists across chats.
-		if rlHits > 0 {
-			extraDelay = math.Min(extraDelay+ExtraDelayPer429*float64(rlHits), ExtraDelayCap)
-			fsutil.Log(fmt.Sprintf("    pace slowed: +%.0fs per chat from now on", extraDelay))
-		}
-		if exported%LongBreakEvery == 0 {
-			pause := uniform(LongBreakMin, LongBreakMax)
-			fsutil.Log(fmt.Sprintf("    taking a %ds breather after %d chats...", int(pause), exported))
-			if err := sleep(ctx, seconds(pause)); err != nil {
-				return summaryNow(), err
-			}
-		}
-		if err := sleep(ctx, seconds(uniform(DelayMin, DelayMax)+extraDelay)); err != nil {
+		if err := pace(rlHits); err != nil {
 			return summaryNow(), err
 		}
 	}

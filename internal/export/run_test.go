@@ -215,7 +215,7 @@ func TestExportLoop(t *testing.T) {
 	//  001 already exported (resume skip)
 	//  002 plain 200 with a file ref (download attempted, records a failure)
 	//  003 throttled twice then 200 (exercises backoff + permanent slowdown)
-	//  004 fails all attempts (failed manifest row)
+	//  004 fails all attempts (failed manifest row, still paces afterward)
 	cids := []string{
 		"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
 		"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
@@ -348,24 +348,30 @@ func TestExportLoop(t *testing.T) {
 	}
 
 	// --- pacing math ---
-	// Two chats exported, neither is the 20th, so no long break fired. The
-	// long break sleeps exactly seconds(LongBreakMin) with uniform pinned low
+	// Three chats attempted (Beta, Gamma, Delta — Alpha was skipped and does
+	// not count), nowhere near the 20th, so no long break fired. The long
+	// break sleeps exactly seconds(LongBreakMin) with uniform pinned low
 	// (distinct from the 300s/600s rate-limit backoffs).
 	for _, d := range *got {
 		if d == seconds(LongBreakMin) {
-			t.Errorf("unexpected long-break sleep %v (no 20th chat)", d)
+			t.Errorf("unexpected long-break sleep %v (not the 20th attempted chat)", d)
 		}
 	}
 	// Beta exported with rlHits=0 → per-chat delay == DelayMin (uniform pinned
 	// to min, extraDelay 0). Gamma exported after 2 throttles → extraDelay =
-	// ExtraDelayPer429*2 = 10, per-chat delay == DelayMin + 10.
+	// ExtraDelayPer429*2 = 10, per-chat delay == DelayMin + 10. Delta then
+	// fails outright, but paces exactly like a success (see pace's doc
+	// comment in run.go): its delay is also DelayMin+10, since Gamma's
+	// throttle already grew extraDelay and Delta's own capture hit none —
+	// indistinguishable in this assertion from Gamma's, which is fine, the
+	// dedicated failure-pacing tests below pin that behavior down precisely.
 	betaDelay := seconds(DelayMin)
 	gammaDelay := seconds(DelayMin + ExtraDelayPer429*2)
 	if !containsDuration(*got, betaDelay) {
 		t.Errorf("expected a per-chat delay of %v (Beta); got %v", betaDelay, *got)
 	}
 	if !containsDuration(*got, gammaDelay) {
-		t.Errorf("expected a grown per-chat delay of %v (Gamma, after 2x429); got %v", gammaDelay, *got)
+		t.Errorf("expected a grown per-chat delay of %v (Gamma, after 2x429, and Delta which paces the same); got %v", gammaDelay, *got)
 	}
 	// The two 429 backoffs (300s, 600s) must have been slept.
 	if !containsDuration(*got, 300*time.Second) || !containsDuration(*got, 600*time.Second) {
@@ -598,5 +604,203 @@ func TestExportCancelledDuringDownloadsSkipsMarker(t *testing.T) {
 	// ...but the completion marker must NOT be written on cancellation.
 	if _, err := os.Stat(filepath.Join(folder, "conversation.json")); !os.IsNotExist(err) {
 		t.Errorf("conversation.json marker must NOT exist after cancellation; stat err=%v", err)
+	}
+}
+
+// TestExportFailedChatPaces proves the fix: a chat whose capture never
+// produces data still runs the same polite delay a successful chat would,
+// rather than skipping straight to the next chat as export_chats.py:797-801
+// does. The scripted capture returns 200 with an empty map on the FIRST
+// attempt (Python's falsy `{}`), so captureWithRetry itself contributes no
+// sleep of its own — isolating exactly the pacing sleep under test.
+func TestExportFailedChatPaces(t *testing.T) {
+	got := recordSleeps(t)
+	outDir := t.TempDir()
+	csvPath := filepath.Join(outDir, "chats.csv")
+	base := browser.BaseURL
+	cid := "33333333-0000-0000-0000-000000000000"
+	writeCSV(t, csvPath, [][2]string{{base + "/c/" + cid, "Fail"}})
+
+	fb := &fakeBrowser{
+		auth:   map[string]string{"Authorization": "x"},
+		client: &fakeFilesClient{},
+		captures: map[string]*scriptedCapture{
+			cid: {results: []captureResult{{data: map[string]any{}, status: 200}}},
+		},
+	}
+
+	sum, err := Export(context.Background(), fb, Config{CSVPath: csvPath, OutDir: outDir})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if sum.Failed != 1 {
+		t.Fatalf("summary.Failed = %d, want 1", sum.Failed)
+	}
+
+	// Exactly one pacing sleep, sized DelayMin (uniform pinned low, no
+	// throttling so extraDelay stays 0): the failed chat pays the same
+	// per-chat delay a success would.
+	if len(*got) != 1 {
+		t.Fatalf("sleeps = %v, want exactly one", *got)
+	}
+	if (*got)[0] != seconds(DelayMin) {
+		t.Errorf("sleep = %v, want %v", (*got)[0], seconds(DelayMin))
+	}
+}
+
+// TestExportLongBreakFiresOnFailures proves the breather keys off attempted
+// chats, not exported ones: LongBreakEvery chats all fail outright (empty-map
+// captures, so no chat is ever exported), and the breather must still fire
+// exactly once, after the 20th attempt.
+func TestExportLongBreakFiresOnFailures(t *testing.T) {
+	got := recordSleeps(t)
+	outDir := t.TempDir()
+	csvPath := filepath.Join(outDir, "chats.csv")
+
+	var rows [][2]string
+	captures := map[string]*scriptedCapture{}
+	for i := 0; i < LongBreakEvery; i++ {
+		cid := fmt.Sprintf("%08d-0000-0000-0000-000000000001", i)
+		rows = append(rows, [2]string{browser.BaseURL + "/c/" + cid, fmt.Sprintf("Fail%02d", i)})
+		captures[cid] = &scriptedCapture{results: []captureResult{{data: map[string]any{}, status: 200}}}
+	}
+	writeCSV(t, csvPath, rows)
+
+	fb := &fakeBrowser{auth: map[string]string{"Authorization": "x"}, client: &fakeFilesClient{}, captures: captures}
+	sum, err := Export(context.Background(), fb, Config{CSVPath: csvPath, OutDir: outDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Failed != LongBreakEvery || sum.Exported != 0 {
+		t.Fatalf("summary = %+v, want failed=%d exported=0", sum, LongBreakEvery)
+	}
+
+	// Exactly one long-break-sized sleep, despite every chat failing.
+	long := 0
+	for _, d := range *got {
+		if d == seconds(LongBreakMin) {
+			long++
+		}
+	}
+	if long != 1 {
+		t.Errorf("long-break sleeps = %d, want 1; sleeps=%v", long, *got)
+	}
+}
+
+// TestExportSkippedChatsDontCountTowardPacing proves that chats skipped by
+// the resume check (conversation.json already present) neither pace nor
+// count toward the long-break cadence. LongBreakEvery-1 chats are
+// pre-marked done; if a skip wrongly counted as "attempted", the one real
+// chat that follows would land on the 20th attempt and trigger the
+// breather. It must not.
+func TestExportSkippedChatsDontCountTowardPacing(t *testing.T) {
+	got := recordSleeps(t)
+	outDir := t.TempDir()
+	csvPath := filepath.Join(outDir, "chats.csv")
+	base := browser.BaseURL
+
+	var rows [][2]string
+	for i := 0; i < LongBreakEvery-1; i++ {
+		cid := fmt.Sprintf("%08d-0000-0000-0000-000000000002", i)
+		rows = append(rows, [2]string{base + "/c/" + cid, fmt.Sprintf("Skip%02d", i)})
+	}
+	realCID := "99999999-0000-0000-0000-000000000000"
+	rows = append(rows, [2]string{base + "/c/" + realCID, "Real"})
+	writeCSV(t, csvPath, rows)
+
+	// Pre-create the markers for the skip chats so the resume check fires.
+	for i := 0; i < LongBreakEvery-1; i++ {
+		cid := fmt.Sprintf("%08d-0000-0000-0000-000000000002", i)
+		title := fmt.Sprintf("Skip%02d", i)
+		folder := filepath.Join(outDir, fmt.Sprintf("%03d_%s_%s", i+1, title, cid[:8]))
+		if err := os.MkdirAll(folder, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(folder, "conversation.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fb := &fakeBrowser{
+		auth:   map[string]string{"Authorization": "x"},
+		client: &fakeFilesClient{},
+		captures: map[string]*scriptedCapture{
+			realCID: {results: []captureResult{{data: smallConv(realCID, "hi", "", ""), status: 200}}},
+		},
+	}
+
+	sum, err := Export(context.Background(), fb, Config{CSVPath: csvPath, OutDir: outDir})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if sum.Skipped != LongBreakEvery-1 || sum.Exported != 1 {
+		t.Fatalf("summary = %+v, want skipped=%d exported=1", sum, LongBreakEvery-1)
+	}
+
+	for _, d := range *got {
+		if d == seconds(LongBreakMin) {
+			t.Errorf("unexpected long-break sleep %v; skip chats must not count toward the breather", d)
+		}
+	}
+	if len(*got) != 1 || (*got)[0] != seconds(DelayMin) {
+		t.Errorf("sleeps = %v, want exactly [%v] (the one real chat's ordinary per-chat delay)", *got, seconds(DelayMin))
+	}
+}
+
+// TestExportCancelledDuringFailedChatPacing proves that cancellation landing
+// during a FAILED chat's pacing sleep aborts the run — propagating
+// ctx.Err() and never moving on to the next chat — exactly like the
+// existing cancellation-during-success behavior in TestExportInterrupted.
+func TestExportCancelledDuringFailedChatPacing(t *testing.T) {
+	outDir := t.TempDir()
+	csvPath := filepath.Join(outDir, "chats.csv")
+	base := browser.BaseURL
+	cids := []string{
+		"11111111-0000-0000-0000-000000000000",
+		"22222222-0000-0000-0000-000000000000",
+	}
+	writeCSV(t, csvPath, [][2]string{
+		{base + "/c/" + cids[0], "One"},
+		{base + "/c/" + cids[1], "Two"},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	origSleep, origUniform := sleep, uniform
+	t.Cleanup(func() { sleep, uniform = origSleep, origUniform })
+	uniform = func(min, max float64) float64 { return min }
+	calls := 0
+	// The failed chat's pacing sleep is the very first sleep call (the
+	// empty-map capture resolves on attempt one, so captureWithRetry itself
+	// never sleeps); cancel here, standing in for a SIGINT landing mid-sleep.
+	sleep = func(c context.Context, d time.Duration) error {
+		calls++
+		cancel()
+		return c.Err()
+	}
+
+	fb := &fakeBrowser{
+		auth:   map[string]string{"Authorization": "x"},
+		client: &fakeFilesClient{},
+		captures: map[string]*scriptedCapture{
+			cids[0]: {results: []captureResult{{data: map[string]any{}, status: 200}}},
+		},
+	}
+
+	sum, err := Export(ctx, fb, Config{CSVPath: csvPath, OutDir: outDir})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Export err = %v, want context.Canceled", err)
+	}
+	if calls != 1 {
+		t.Errorf("sleep calls = %d, want 1 (the failed chat's pacing sleep)", calls)
+	}
+	if sum.Failed != 1 {
+		t.Errorf("summary.Failed = %d, want 1", sum.Failed)
+	}
+
+	// The run stopped after chat One rather than moving on to chat Two: only
+	// the header + One's failed row are in the manifest.
+	manifestRows := readManifest(t, outDir)
+	if len(manifestRows) != 2 {
+		t.Errorf("manifest has %d rows, want 2 (header + One failed); rows=%v", len(manifestRows), manifestRows)
 	}
 }
