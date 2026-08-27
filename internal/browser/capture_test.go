@@ -162,7 +162,7 @@ func responded(w *convWatcher) bool {
 }
 
 func TestConvWatcherMatchesGetResponse(t *testing.T) {
-	w := newConvWatcher("/backend-api/conversation/" + testCID)
+	w := newConvWatcher(testCID)
 	w.handle(requestEvent("1", convURL(testCID), "GET", network.Headers{
 		"authorization":      "Bearer tok",
 		"chatgpt-account-id": "acct-1",
@@ -174,7 +174,7 @@ func TestConvWatcherMatchesGetResponse(t *testing.T) {
 	if !responded(w) {
 		t.Fatal("did not signal after the matching response")
 	}
-	id, status, hdr := w.result()
+	id, status, hdr, _ := w.result()
 	if id != "1" || status != 200 {
 		t.Errorf("result = (%v, %d), want (1, 200)", id, status)
 	}
@@ -184,7 +184,7 @@ func TestConvWatcherMatchesGetResponse(t *testing.T) {
 }
 
 func TestConvWatcherExtraInfoBeforeRequestEvent(t *testing.T) {
-	w := newConvWatcher("/backend-api/conversation/" + testCID)
+	w := newConvWatcher(testCID)
 	// ExtraInfo (the wire Authorization) arrives before the URL-bearing request
 	// event, which the protocol permits — it must be buffered, not dropped.
 	w.handle(&network.EventRequestWillBeSentExtraInfo{
@@ -197,7 +197,7 @@ func TestConvWatcherExtraInfoBeforeRequestEvent(t *testing.T) {
 	if !responded(w) {
 		t.Fatal("did not signal after the matching response")
 	}
-	_, _, hdr := w.result()
+	_, _, hdr, _ := w.result()
 	got := AuthHeaders(hdr)
 	if got["Authorization"] != "Bearer wire" || got["chatgpt-account-id"] != "acct-1" {
 		t.Errorf("captured auth headers = %v, want the buffered wire Authorization merged in", got)
@@ -207,7 +207,7 @@ func TestConvWatcherExtraInfoBeforeRequestEvent(t *testing.T) {
 // export_chats.py:671-672 requires BOTH the URL match and method == GET; the
 // frontend POSTs to the same path while the chat is open.
 func TestConvWatcherIgnoresNonGet(t *testing.T) {
-	w := newConvWatcher("/backend-api/conversation/" + testCID)
+	w := newConvWatcher(testCID)
 	w.handle(requestEvent("1", convURL(testCID), "POST", nil))
 	w.handle(responseEvent("1", convURL(testCID), 200, nil))
 	if responded(w) {
@@ -216,7 +216,7 @@ func TestConvWatcherIgnoresNonGet(t *testing.T) {
 }
 
 func TestConvWatcherIgnoresOtherConversations(t *testing.T) {
-	w := newConvWatcher("/backend-api/conversation/" + testCID)
+	w := newConvWatcher(testCID)
 	other := "11111111-2222-3333-4444-555555555555"
 	w.handle(requestEvent("1", convURL(other), "GET", nil))
 	w.handle(responseEvent("1", convURL(other), 200, nil))
@@ -231,7 +231,7 @@ func TestConvWatcherIgnoresOtherConversations(t *testing.T) {
 // A response with no preceding requestWillBeSent cannot have its method
 // checked, so it is skipped rather than guessed at.
 func TestConvWatcherIgnoresUnknownRequestID(t *testing.T) {
-	w := newConvWatcher("/backend-api/conversation/" + testCID)
+	w := newConvWatcher(testCID)
 	w.handle(responseEvent("9", convURL(testCID), 200, nil))
 	if responded(w) {
 		t.Error("captured a response with no matching request")
@@ -239,13 +239,13 @@ func TestConvWatcherIgnoresUnknownRequestID(t *testing.T) {
 }
 
 func TestConvWatcherNonOKStatus(t *testing.T) {
-	w := newConvWatcher("/backend-api/conversation/" + testCID)
+	w := newConvWatcher(testCID)
 	w.handle(requestEvent("1", convURL(testCID), "GET", nil))
 	w.handle(responseEvent("1", convURL(testCID), 429, nil))
 	if !responded(w) {
 		t.Fatal("a non-200 response must still be reported, so the caller can back off")
 	}
-	if _, status, _ := w.result(); status != 429 {
+	if _, status, _, _ := w.result(); status != 429 {
 		t.Errorf("status = %d, want 429", status)
 	}
 }
@@ -253,21 +253,21 @@ func TestConvWatcherNonOKStatus(t *testing.T) {
 // requestWillBeSentExtraInfo carries the headers actually put on the wire;
 // the auth header is often only visible there.
 func TestConvWatcherMergesExtraInfoHeaders(t *testing.T) {
-	w := newConvWatcher("/backend-api/conversation/" + testCID)
+	w := newConvWatcher(testCID)
 	w.handle(requestEvent("1", convURL(testCID), "GET", network.Headers{"accept": "*/*"}))
 	w.handle(&network.EventRequestWillBeSentExtraInfo{
 		RequestID: "1",
 		Headers:   network.Headers{"authorization": "Bearer wire"},
 	})
 	w.handle(responseEvent("1", convURL(testCID), 200, nil))
-	_, _, hdr := w.result()
+	_, _, hdr, _ := w.result()
 	if AuthHeaders(hdr)["Authorization"] != "Bearer wire" {
 		t.Errorf("extra-info headers were not merged: %v", hdr)
 	}
 }
 
 func TestConvWatcherIgnoresExtraInfoForUnknownRequests(t *testing.T) {
-	w := newConvWatcher("/backend-api/conversation/" + testCID)
+	w := newConvWatcher(testCID)
 	w.handle(&network.EventRequestWillBeSentExtraInfo{
 		RequestID: "unrelated",
 		Headers:   network.Headers{"authorization": "Bearer tok"},
@@ -280,19 +280,19 @@ func TestConvWatcherIgnoresExtraInfoForUnknownRequests(t *testing.T) {
 // Response.requestHeaders is the refined set the network stack sent; use it
 // where the earlier events had nothing.
 func TestConvWatcherFallsBackToResponseRequestHeaders(t *testing.T) {
-	w := newConvWatcher("/backend-api/conversation/" + testCID)
+	w := newConvWatcher(testCID)
 	w.handle(requestEvent("1", convURL(testCID), "GET", nil))
 	w.handle(responseEvent("1", convURL(testCID), 200, network.Headers{
 		"authorization": "Bearer resp",
 	}))
-	_, _, hdr := w.result()
+	_, _, hdr, _ := w.result()
 	if AuthHeaders(hdr)["Authorization"] != "Bearer resp" {
 		t.Errorf("response request-headers were not used: %v", hdr)
 	}
 }
 
 func TestConvWatcherLoadingFinishedOnlyForMatchedRequest(t *testing.T) {
-	w := newConvWatcher("/backend-api/conversation/" + testCID)
+	w := newConvWatcher(testCID)
 	w.handle(requestEvent("1", convURL(testCID), "GET", nil))
 	w.handle(responseEvent("1", convURL(testCID), 200, nil))
 
@@ -312,7 +312,7 @@ func TestConvWatcherLoadingFinishedOnlyForMatchedRequest(t *testing.T) {
 }
 
 func TestConvWatcherLoadingFailed(t *testing.T) {
-	w := newConvWatcher("/backend-api/conversation/" + testCID)
+	w := newConvWatcher(testCID)
 	w.handle(requestEvent("1", convURL(testCID), "GET", nil))
 	w.handle(responseEvent("1", convURL(testCID), 200, nil))
 	w.handle(&network.EventLoadingFailed{RequestID: "1", ErrorText: "net::ERR_ABORTED"})
@@ -328,13 +328,97 @@ func TestConvWatcherLoadingFailed(t *testing.T) {
 
 // Only the first matching response wins, mirroring expect_response.
 func TestConvWatcherKeepsFirstResponse(t *testing.T) {
-	w := newConvWatcher("/backend-api/conversation/" + testCID)
+	w := newConvWatcher(testCID)
 	w.handle(requestEvent("1", convURL(testCID), "GET", nil))
 	w.handle(responseEvent("1", convURL(testCID), 200, nil))
 	w.handle(requestEvent("2", convURL(testCID), "GET", nil))
 	w.handle(responseEvent("2", convURL(testCID), 500, nil))
-	if id, status, _ := w.result(); id != "1" || status != 200 {
+	if id, status, _, _ := w.result(); id != "1" || status != 200 {
 		t.Errorf("result = (%v, %d), want the first response (1, 200)", id, status)
+	}
+}
+
+func TestConversationDetailURL(t *testing.T) {
+	const other = "11111111-2222-3333-4444-555555555555"
+	tests := []struct {
+		name        string
+		url         string
+		cid         string
+		wantMatch   bool
+		wantMapping bool
+	}{
+		{
+			name:        "singular mapping-shaped endpoint",
+			url:         BaseURL + "/backend-api/conversation/" + testCID,
+			cid:         testCID,
+			wantMatch:   true,
+			wantMapping: true,
+		},
+		{
+			name:        "plural paginated endpoint with query string",
+			url:         BaseURL + "/backend-api/conversations/" + testCID + "?include_has_versions=true&num_turns=10",
+			cid:         testCID,
+			wantMatch:   true,
+			wantMapping: false,
+		},
+		{
+			// The regression: a sub-resource under the singular endpoint must
+			// not be mistaken for the conversation itself.
+			name:        "textdocs sub-resource of the singular endpoint",
+			url:         BaseURL + "/backend-api/conversation/" + testCID + "/textdocs",
+			cid:         testCID,
+			wantMatch:   false,
+			wantMapping: false,
+		},
+		{
+			name:        "another conversation's singular endpoint",
+			url:         BaseURL + "/backend-api/conversation/" + other,
+			cid:         testCID,
+			wantMatch:   false,
+			wantMapping: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			match, mappingShaped := conversationDetailURL(tt.url, tt.cid)
+			if match != tt.wantMatch || mappingShaped != tt.wantMapping {
+				t.Errorf("conversationDetailURL(%q, %q) = (%v, %v), want (%v, %v)",
+					tt.url, tt.cid, match, mappingShaped, tt.wantMatch, tt.wantMapping)
+			}
+		})
+	}
+}
+
+// The regression this guards against: a substring match on
+// "/backend-api/conversation/<cid>" also matched /textdocs, and that
+// sub-resource's non-mapping body ("[]") won the first-response-wins race.
+func TestConvWatcherIgnoresTextdocsSubResource(t *testing.T) {
+	w := newConvWatcher(testCID)
+	textdocsURL := convURL(testCID) + "/textdocs"
+	w.handle(requestEvent("1", textdocsURL, "GET", nil))
+	w.handle(responseEvent("1", textdocsURL, 200, nil))
+	if responded(w) {
+		t.Error("a /textdocs sub-resource response must not be captured as the conversation itself")
+	}
+}
+
+// The plural endpoint must still be recognised as the conversation response
+// (so the caller knows the frontend answered and can move on to a targeted
+// re-fetch), but flagged as not mapping-shaped.
+func TestConvWatcherMatchesPluralEndpointAsNonMapping(t *testing.T) {
+	w := newConvWatcher(testCID)
+	pluralURL := BaseURL + "/backend-api/conversations/" + testCID + "?include_has_versions=true&num_turns=10"
+	w.handle(requestEvent("1", pluralURL, "GET", nil))
+	w.handle(responseEvent("1", pluralURL, 200, nil))
+	if !responded(w) {
+		t.Fatal("the plural conversation endpoint must still signal respCh")
+	}
+	_, status, _, mappingShaped := w.result()
+	if status != 200 {
+		t.Errorf("status = %d, want 200", status)
+	}
+	if mappingShaped {
+		t.Error("the plural endpoint must be reported as not mapping-shaped")
 	}
 }
 
