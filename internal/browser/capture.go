@@ -314,8 +314,12 @@ type convWatcher struct {
 func newConvWatcher(cid string) *convWatcher {
 	return &convWatcher{
 		cid: cid,
-		// Scoped to a single capture and only ever holding requests whose
-		// URL is this conversation's own endpoint, so it cannot grow unbounded.
+		// reqs only ever holds requests whose URL is this conversation's own
+		// endpoint. extra is different: ExtraInfo carries no URL, so it buffers
+		// the wire headers of every request whose URL we have not seen yet, and
+		// entries for requests that turn out not to match are only dropped when
+		// the watcher is — both maps live for exactly one capture and are
+		// bounded by the requests of a single page load.
 		reqs:   make(map[network.RequestID]*convRequest),
 		extra:  make(map[network.RequestID]map[string]string),
 		respCh: make(chan struct{}),
