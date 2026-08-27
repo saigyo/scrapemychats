@@ -62,6 +62,14 @@ type fakeBrowser struct {
 	captures map[string]*scriptedCapture
 	client   files.Client
 	fetcher  browser.Fetcher
+
+	// throttleHits scripts TakeThrottleHits: one queued value is consumed per
+	// call, in order (the export loop calls it exactly once per attempted
+	// chat); once exhausted, further calls return 0. throttleCalls counts
+	// every call, scripted or not, so a test can assert the counter was read
+	// even when it presets no hits.
+	throttleHits  []int
+	throttleCalls int
 }
 
 func (b *fakeBrowser) EnsureLoggedIn() error { b.loggedIn = true; return nil }
@@ -90,6 +98,16 @@ func (b *fakeBrowser) CaptureConversation(url, cid string) (map[string]any, map[
 
 func (b *fakeBrowser) Client() files.Client     { return b.client }
 func (b *fakeBrowser) Fetcher() browser.Fetcher { return b.fetcher }
+
+func (b *fakeBrowser) TakeThrottleHits() int {
+	b.throttleCalls++
+	if len(b.throttleHits) == 0 {
+		return 0
+	}
+	v := b.throttleHits[0]
+	b.throttleHits = b.throttleHits[1:]
+	return v
+}
 
 // ---------------------------------------------------------------------------
 // fake files.Client
@@ -506,6 +524,7 @@ func (b *cancelBrowser) EnsureLoggedIn() error                   { return nil }
 func (b *cancelBrowser) CaptureAuth() (map[string]string, error) { return b.auth, nil }
 func (b *cancelBrowser) Client() files.Client                    { return b.client }
 func (b *cancelBrowser) Fetcher() browser.Fetcher                { return nil }
+func (b *cancelBrowser) TakeThrottleHits() int                   { return 0 }
 
 func (b *cancelBrowser) CaptureConversation(url, cid string) (map[string]any, map[string]string, int, error) {
 	b.calls++
@@ -744,6 +763,204 @@ func TestExportSkippedChatsDontCountTowardPacing(t *testing.T) {
 	}
 	if len(*got) != 1 || (*got)[0] != seconds(DelayMin) {
 		t.Errorf("sleeps = %v, want exactly [%v] (the one real chat's ordinary per-chat delay)", *got, seconds(DelayMin))
+	}
+}
+
+// TestExportSoftThrottleCoolsDownAndGrowsPace proves the fix for the
+// universal 429 modal: a chat whose OWN capture came back 200 (rlHits == 0)
+// but that observed 429s on the page's other backend calls (soft hits) takes
+// the one-off SoftThrottleCooldown sleep and then grows extraDelay through the
+// same pace() machinery a hard throttle would, so the next chat's per-chat
+// delay is bigger than DelayMin.
+func TestExportSoftThrottleCoolsDownAndGrowsPace(t *testing.T) {
+	got := recordSleeps(t)
+	outDir := t.TempDir()
+	csvPath := filepath.Join(outDir, "chats.csv")
+	base := browser.BaseURL
+	cids := []string{
+		"44444444-0000-0000-0000-000000000000",
+		"55555555-0000-0000-0000-000000000000",
+	}
+	writeCSV(t, csvPath, [][2]string{
+		{base + "/c/" + cids[0], "SoftOne"},
+		{base + "/c/" + cids[1], "SoftTwo"},
+	})
+
+	fb := &fakeBrowser{
+		auth:   map[string]string{"Authorization": "x"},
+		client: &fakeFilesClient{},
+		captures: map[string]*scriptedCapture{
+			cids[0]: {results: []captureResult{{data: smallConv(cids[0], "hi one", "", ""), status: 200}}},
+			cids[1]: {results: []captureResult{{data: smallConv(cids[1], "hi two", "", ""), status: 200}}},
+		},
+		// Chat one observes 3 soft hits; chat two observes none.
+		throttleHits: []int{3, 0},
+	}
+
+	sum, err := Export(context.Background(), fb, Config{CSVPath: csvPath, OutDir: outDir})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if sum.Exported != 2 {
+		t.Fatalf("summary.Exported = %d, want 2", sum.Exported)
+	}
+	if fb.throttleCalls != 2 {
+		t.Errorf("TakeThrottleHits calls = %d, want 2 (once per attempted chat)", fb.throttleCalls)
+	}
+
+	// The soft cooldown sleep must have fired exactly once.
+	coolCount := 0
+	for _, d := range *got {
+		if d == SoftThrottleCooldown {
+			coolCount++
+		}
+	}
+	if coolCount != 1 {
+		t.Errorf("SoftThrottleCooldown sleeps = %d, want 1; sleeps=%v", coolCount, *got)
+	}
+
+	// Chat one's own pacing delay grows by ExtraDelayPer429*3 on top of
+	// DelayMin, and chat two's delay (after the slowdown) is grown the same
+	// way since extraDelay is permanent.
+	grownDelay := seconds(DelayMin + ExtraDelayPer429*3)
+	if !containsDuration(*got, grownDelay) {
+		t.Errorf("expected a grown per-chat delay of %v after 3 soft hits; got %v", grownDelay, *got)
+	}
+}
+
+// TestExportHardThrottleSkipsSoftCooldownButDrainsCounter proves that when
+// captureWithRetry itself hard-throttled (rlHits > 0, i.e. the capture
+// returned 429 before eventually succeeding), the soft cooldown is NOT taken
+// on top — the multi-minute RateLimitBackoff already covers it — but
+// TakeThrottleHits is still called so the counter does not leak into a later
+// chat's pacing.
+func TestExportHardThrottleSkipsSoftCooldownButDrainsCounter(t *testing.T) {
+	got := recordSleeps(t)
+	outDir := t.TempDir()
+	csvPath := filepath.Join(outDir, "chats.csv")
+	base := browser.BaseURL
+	cid := "66666666-0000-0000-0000-000000000000"
+	writeCSV(t, csvPath, [][2]string{{base + "/c/" + cid, "HardOne"}})
+
+	fb := &fakeBrowser{
+		auth:   map[string]string{"Authorization": "x"},
+		client: &fakeFilesClient{},
+		captures: map[string]*scriptedCapture{
+			cid: {results: []captureResult{
+				{status: 429},
+				{data: smallConv(cid, "hi", "", ""), status: 200},
+			}},
+		},
+		// Soft hits observed alongside the hard throttle; must be drained but
+		// must NOT add its own cooldown.
+		throttleHits: []int{5},
+	}
+
+	sum, err := Export(context.Background(), fb, Config{CSVPath: csvPath, OutDir: outDir})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if sum.Exported != 1 {
+		t.Fatalf("summary.Exported = %d, want 1", sum.Exported)
+	}
+	if fb.throttleCalls != 1 {
+		t.Errorf("TakeThrottleHits calls = %d, want 1 (counter must be drained)", fb.throttleCalls)
+	}
+	for _, d := range *got {
+		if d == SoftThrottleCooldown {
+			t.Errorf("unexpected SoftThrottleCooldown sleep %v when the capture already hard-throttled", d)
+		}
+	}
+	// The 300s hard-throttle backoff must still have been slept.
+	if !containsDuration(*got, 300*time.Second) {
+		t.Errorf("expected the 300s rate-limit backoff; got %v", *got)
+	}
+}
+
+// TestExportNoSoftThrottleUnchanged proves that with zero soft hits, behavior
+// is exactly as before this feature: no extra sleep, and the counter is still
+// read exactly once per attempted chat.
+func TestExportNoSoftThrottleUnchanged(t *testing.T) {
+	got := recordSleeps(t)
+	outDir := t.TempDir()
+	csvPath := filepath.Join(outDir, "chats.csv")
+	base := browser.BaseURL
+	cid := "77777777-0000-0000-0000-000000000000"
+	writeCSV(t, csvPath, [][2]string{{base + "/c/" + cid, "Plain"}})
+
+	fb := &fakeBrowser{
+		auth:   map[string]string{"Authorization": "x"},
+		client: &fakeFilesClient{},
+		captures: map[string]*scriptedCapture{
+			cid: {results: []captureResult{{data: smallConv(cid, "hi", "", ""), status: 200}}},
+		},
+	}
+
+	if _, err := Export(context.Background(), fb, Config{CSVPath: csvPath, OutDir: outDir}); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if fb.throttleCalls != 1 {
+		t.Errorf("TakeThrottleHits calls = %d, want 1", fb.throttleCalls)
+	}
+	if len(*got) != 1 || (*got)[0] != seconds(DelayMin) {
+		t.Errorf("sleeps = %v, want exactly [%v]", *got, seconds(DelayMin))
+	}
+}
+
+// TestExportCancelledDuringSoftThrottleCooldown proves that cancellation
+// landing during the soft-throttle cooldown sleep aborts the run and returns
+// ctx.Err(), exactly like cancellation during any other pacing sleep.
+func TestExportCancelledDuringSoftThrottleCooldown(t *testing.T) {
+	outDir := t.TempDir()
+	csvPath := filepath.Join(outDir, "chats.csv")
+	base := browser.BaseURL
+	cids := []string{
+		"88888888-0000-0000-0000-000000000000",
+		"99999999-0000-0000-0000-000000000001",
+	}
+	writeCSV(t, csvPath, [][2]string{
+		{base + "/c/" + cids[0], "One"},
+		{base + "/c/" + cids[1], "Two"},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	origSleep, origUniform := sleep, uniform
+	t.Cleanup(func() { sleep, uniform = origSleep, origUniform })
+	uniform = func(min, max float64) float64 { return min }
+	calls := 0
+	// The soft-throttle cooldown is the first sleep call for chat One (its
+	// own capture succeeds on the first attempt, so captureWithRetry never
+	// sleeps); cancel here, standing in for a SIGINT landing mid-cooldown.
+	sleep = func(c context.Context, d time.Duration) error {
+		calls++
+		cancel()
+		return c.Err()
+	}
+
+	fb := &fakeBrowser{
+		auth:   map[string]string{"Authorization": "x"},
+		client: &fakeFilesClient{},
+		captures: map[string]*scriptedCapture{
+			cids[0]: {results: []captureResult{{data: smallConv(cids[0], "hi", "", ""), status: 200}}},
+		},
+		throttleHits: []int{2},
+	}
+
+	sum, err := Export(ctx, fb, Config{CSVPath: csvPath, OutDir: outDir})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Export err = %v, want context.Canceled", err)
+	}
+	if calls != 1 {
+		t.Errorf("sleep calls = %d, want 1 (the soft-throttle cooldown)", calls)
+	}
+	// The run stopped before recording chat One at all (the cooldown sleep
+	// happens before the manifest row is written), and never reached chat Two.
+	if sum.Exported != 0 {
+		t.Errorf("summary.Exported = %d, want 0", sum.Exported)
+	}
+	manifestRows := readManifest(t, outDir)
+	if len(manifestRows) != 1 { // header only
+		t.Errorf("manifest has %d rows, want 1 (header only); rows=%v", len(manifestRows), manifestRows)
 	}
 }
 

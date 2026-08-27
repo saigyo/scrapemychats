@@ -51,6 +51,13 @@ const (
 	LongBreakEvery = 20
 	LongBreakMin   = 150.0
 	LongBreakMax   = 240.0
+	// SoftThrottleCooldown is the one-off pause after the server refused some
+	// of the page's other backend calls while our own capture still
+	// succeeded. There is nothing to retry — the conversation came back
+	// 200 — but the server is visibly complaining (this is what shows the
+	// user ChatGPT's "too many requests" modal), so the run takes one pause
+	// before the normal (now-grown) per-chat pacing resumes.
+	SoftThrottleCooldown = 60 * time.Second
 )
 
 // RateLimitBackoffs are the escalating cool-down waits (seconds) after a
@@ -104,6 +111,9 @@ type Browser interface {
 	Client() files.Client
 	// Fetcher returns the in-page GET primitive discovery needs.
 	Fetcher() browser.Fetcher
+	// TakeThrottleHits reports how many of the page's backend requests the
+	// server refused with HTTP 429 since the last call, and resets the count.
+	TakeThrottleHits() int
 }
 
 // Config holds the settings for one export (or fix-files) run.
@@ -262,6 +272,23 @@ func Export(ctx context.Context, b Browser, cfg Config) (Summary, error) {
 			return summaryNow(), cerr
 		}
 
+		// A soft/observed throttle (the conversation capture itself came back
+		// 200, but the server 429'd some of the page's OTHER backend calls) is
+		// treated more gently than a hard one: there is nothing to retry, but
+		// the server IS complaining and the pace must react. TakeThrottleHits
+		// is called unconditionally so the counter is always drained, even
+		// when rlHits > 0 — in that case captureWithRetry has already applied
+		// one of the multi-minute RateLimitBackoffs, so the observed hits are
+		// drained without adding a second cooldown on top.
+		hits := rlHits
+		if soft := b.TakeThrottleHits(); rlHits == 0 && soft > 0 {
+			hits = soft
+			fsutil.Log(fmt.Sprintf("    server refused %d of the page's requests (HTTP 429), cooling down %ds...", soft, int(SoftThrottleCooldown.Seconds())))
+			if err := sleep(ctx, SoftThrottleCooldown); err != nil {
+				return summaryNow(), err
+			}
+		}
+
 		// Python's `if not data:` — an empty dict is falsy there too, so a 200
 		// that returned {} is recorded as failed just like a missing capture.
 		if len(data) == 0 {
@@ -271,7 +298,7 @@ func Export(ctx context.Context, b Browser, cfg Config) (Summary, error) {
 			}
 			// Pace here too — see the pace closure's doc comment for why a
 			// failed chat is not exempt.
-			if err := pace(rlHits); err != nil {
+			if err := pace(hits); err != nil {
 				return summaryNow(), err
 			}
 			continue
@@ -347,7 +374,7 @@ func Export(ctx context.Context, b Browser, cfg Config) (Summary, error) {
 		}
 		exported++
 
-		if err := pace(rlHits); err != nil {
+		if err := pace(hits); err != nil {
 			return summaryNow(), err
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
@@ -117,6 +118,40 @@ type Session struct {
 	// ua caches the browser's navigator.userAgent (see UserAgent).
 	ua     string
 	uaOnce sync.Once
+
+	// throttleHits counts ChatGPT's 429 refusals on the page's own
+	// /backend-api/ traffic since the last TakeThrottleHits call. It is an
+	// atomic rather than mutex-guarded because countThrottled runs on
+	// chromedp's event goroutine, and an atomic counter is all that goroutine
+	// needs to update safely.
+	throttleHits atomic.Int64
+}
+
+// countThrottled records ChatGPT throttling ANY of the page's backend calls.
+//
+// The SPA's "too many requests" modal is driven by these 429s, and the
+// conversation capture itself can succeed (HTTP 200) while sibling calls
+// (the conversation list, /backend-api/conversation/init, /textdocs, ...)
+// are being refused — so this is the only signal that sees the throttling
+// the user actually sees in the browser window.
+//
+// Only 429 counts: a 403 on some unrelated endpoint is a permissions
+// answer, not a rate-limit one, and must not be conflated with throttling.
+func (s *Session) countThrottled(ev any) {
+	e, ok := ev.(*network.EventResponseReceived)
+	if !ok || e.Response == nil {
+		return
+	}
+	if e.Response.Status == 429 && strings.Contains(e.Response.URL, "/backend-api/") {
+		s.throttleHits.Add(1)
+	}
+}
+
+// TakeThrottleHits returns how many 429s countThrottled has recorded since
+// the last call, resetting the count to zero in the same step (via Swap) so
+// each caller observes each hit exactly once.
+func (s *Session) TakeThrottleHits() int {
+	return int(s.throttleHits.Swap(0))
 }
 
 // Context returns the chromedp target context of the session's page. It is
@@ -163,6 +198,10 @@ func Launch(ctx context.Context, opts Options) (*Session, error) {
 		s.Close()
 		return nil, fmt.Errorf("browser: could not start %s: %w", opts.ExecPath, err)
 	}
+
+	// Lives for the whole session, so it also sees 429s during file
+	// downloads and the library sweep, not just conversation captures.
+	chromedp.ListenTarget(tabCtx, s.countThrottled)
 
 	if err := assertNotAutomated(tabCtx); err != nil {
 		s.Close()

@@ -35,6 +35,8 @@ func (b *sessionBrowser) Client() files.Client {
 	return files.NewSessionClient(b.s)
 }
 
+func (b *sessionBrowser) TakeThrottleHits() int { return b.s.TakeThrottleHits() }
+
 // Fetcher exposes the session as the in-page GET primitive discovery needs;
 // *browser.Session already satisfies browser.Fetcher via its Fetch method.
 func (b *sessionBrowser) Fetcher() browser.Fetcher {
