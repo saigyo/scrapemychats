@@ -22,27 +22,27 @@ func TestCountThrottled(t *testing.T) {
 	}{
 		{
 			name: "429 on a backend-api URL increments",
-			ev:   respEvent(429, "https://chatgpt.com/backend-api/conversation/abc"),
+			ev:   respEvent(429, BaseURL+"/backend-api/conversation/abc"),
 			want: 1,
 		},
 		{
 			name: "200 on a backend-api URL does not count",
-			ev:   respEvent(200, "https://chatgpt.com/backend-api/conversation/abc"),
+			ev:   respEvent(200, BaseURL+"/backend-api/conversation/abc"),
 			want: 0,
 		},
 		{
 			name: "429 on a non-backend URL does not count",
-			ev:   respEvent(429, "https://chatgpt.com/static/app.js"),
+			ev:   respEvent(429, BaseURL+"/static/app.js"),
 			want: 0,
 		},
 		{
 			name: "429 on a chat page URL does not count",
-			ev:   respEvent(429, "https://chatgpt.com/c/some-conversation-id"),
+			ev:   respEvent(429, BaseURL+"/c/some-conversation-id"),
 			want: 0,
 		},
 		{
 			name: "403 on a backend-api URL does not count (permissions, not rate-limit)",
-			ev:   respEvent(403, "https://chatgpt.com/backend-api/conversation/abc"),
+			ev:   respEvent(403, BaseURL+"/backend-api/conversation/abc"),
 			want: 0,
 		},
 		{
@@ -54,6 +54,26 @@ func TestCountThrottled(t *testing.T) {
 			name: "a nil Response does not panic",
 			ev:   &network.EventResponseReceived{Response: nil},
 			want: 0,
+		},
+		{
+			name: "429 on another host with a /backend-api/ path does not count",
+			ev:   respEvent(429, "http://127.0.0.1:8080/backend-api/x"),
+			want: 0,
+		},
+		{
+			name: "429 whose /backend-api/ appears only in the query string does not count",
+			ev:   respEvent(429, BaseURL+"/c/abc?next=/backend-api/conversation/x"),
+			want: 0,
+		},
+		{
+			name: "429 whose /backend-api/ appears only in the fragment does not count",
+			ev:   respEvent(429, BaseURL+"/c/abc#/backend-api/conversation/x"),
+			want: 0,
+		},
+		{
+			name: "429 on a real backend URL with a query string increments",
+			ev:   respEvent(429, BaseURL+"/backend-api/conversations?offset=0&limit=28"),
+			want: 1,
 		},
 	}
 	for _, tt := range tests {
@@ -71,9 +91,9 @@ func TestCountThrottled(t *testing.T) {
 // count and resets it to zero, so a second call in a row sees no repeats.
 func TestTakeThrottleHitsResets(t *testing.T) {
 	s := &Session{}
-	s.countThrottled(respEvent(429, "https://chatgpt.com/backend-api/conversation/init"))
-	s.countThrottled(respEvent(429, "https://chatgpt.com/backend-api/textdocs"))
-	s.countThrottled(respEvent(200, "https://chatgpt.com/backend-api/conversation/abc"))
+	s.countThrottled(respEvent(429, BaseURL+"/backend-api/conversation/init"))
+	s.countThrottled(respEvent(429, BaseURL+"/backend-api/textdocs"))
+	s.countThrottled(respEvent(200, BaseURL+"/backend-api/conversation/abc"))
 
 	if got := s.TakeThrottleHits(); got != 2 {
 		t.Fatalf("first TakeThrottleHits() = %d, want 2", got)

@@ -137,12 +137,17 @@ type Session struct {
 //
 // Only 429 counts: a 403 on some unrelated endpoint is a permissions
 // answer, not a rate-limit one, and must not be conflated with throttling.
+//
+// Matching the full BaseURL origin plus the /backend-api/ path prefix —
+// rather than a substring anywhere in the URL — keeps a 429 from another
+// host, or one whose query string merely quotes a backend URL, from
+// spending a cooldown.
 func (s *Session) countThrottled(ev any) {
 	e, ok := ev.(*network.EventResponseReceived)
 	if !ok || e.Response == nil {
 		return
 	}
-	if e.Response.Status == 429 && strings.Contains(e.Response.URL, "/backend-api/") {
+	if e.Response.Status == 429 && strings.HasPrefix(e.Response.URL, BaseURL+"/backend-api/") {
 		s.throttleHits.Add(1)
 	}
 }
