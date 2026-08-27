@@ -257,22 +257,51 @@ type convRequest struct {
 	headers map[string]string
 }
 
+// conversationDetailURL reports whether rawURL requests the conversation as a
+// whole rather than one of the sub-resources under it (/textdocs,
+// /interpreter/download, ...), and whether it is the mapping-shaped
+// /backend-api/conversation/<cid> endpoint. ChatGPT's frontend moved to the
+// plural /backend-api/conversations/<cid>, whose body is a paginated
+// {messages, page_info} list this exporter cannot read, so the two spellings
+// have to be told apart: matching the plural path too (as mappingShaped=false)
+// lets the caller notice it and re-fetch the singular endpoint instead of
+// silently misreading a shape it was never taught. A plain substring check
+// used to match both endpoints AND their sub-resources (e.g. .../textdocs),
+// which is what broke this in the field: the sub-resource response won the
+// first-response-wins race and its non-mapping body was fed to the parser.
+func conversationDetailURL(rawURL, cid string) (match, mappingShaped bool) {
+	path := rawURL
+	if i := strings.IndexAny(path, "?#"); i >= 0 {
+		path = path[:i]
+	}
+	switch {
+	case strings.HasSuffix(path, "/backend-api/conversation/"+cid):
+		return true, true
+	case strings.HasSuffix(path, "/backend-api/conversations/"+cid):
+		return true, false
+	default:
+		return false, false
+	}
+}
+
 // convWatcher matches the frontend's GET of one conversation's JSON and
 // signals the two moments the caller cares about: the response headers
-// (status + request headers) and the body having finished loading.
+// (status + request headers, plus whether the matched endpoint is the
+// mapping-shaped one) and the body having finished loading.
 //
 // handle runs on chromedp's event goroutine; mu guards every field and the
 // signals are buffered channels closed exactly once.
 type convWatcher struct {
-	needle string
+	cid string
 
-	mu      sync.Mutex
-	reqs    map[network.RequestID]*convRequest
-	extra   map[network.RequestID]map[string]string // ExtraInfo seen before its request event
-	matched network.RequestID
-	hasResp bool
-	status  int
-	headers map[string]string
+	mu            sync.Mutex
+	reqs          map[network.RequestID]*convRequest
+	extra         map[network.RequestID]map[string]string // ExtraInfo seen before its request event
+	matched       network.RequestID
+	hasResp       bool
+	status        int
+	headers       map[string]string
+	mappingShaped bool
 
 	respOnce sync.Once
 	respCh   chan struct{}
@@ -282,11 +311,11 @@ type convWatcher struct {
 	failCh   chan string
 }
 
-func newConvWatcher(needle string) *convWatcher {
+func newConvWatcher(cid string) *convWatcher {
 	return &convWatcher{
-		needle: needle,
+		cid: cid,
 		// Scoped to a single capture and only ever holding requests whose
-		// URL contains this conversation's id, so it cannot grow unbounded.
+		// URL is this conversation's own endpoint, so it cannot grow unbounded.
 		reqs:   make(map[network.RequestID]*convRequest),
 		extra:  make(map[network.RequestID]map[string]string),
 		respCh: make(chan struct{}),
@@ -298,7 +327,10 @@ func newConvWatcher(needle string) *convWatcher {
 func (w *convWatcher) handle(ev any) {
 	switch e := ev.(type) {
 	case *network.EventRequestWillBeSent:
-		if e.Request == nil || !strings.Contains(e.Request.URL, w.needle) {
+		if e.Request == nil {
+			return
+		}
+		if match, _ := conversationDetailURL(e.Request.URL, w.cid); !match {
 			return
 		}
 		w.mu.Lock()
@@ -330,7 +362,11 @@ func (w *convWatcher) handle(ev any) {
 		w.extra[e.RequestID] = mergeHeaders(w.extra[e.RequestID], headerMap(e.Headers))
 
 	case *network.EventResponseReceived:
-		if e.Response == nil || !strings.Contains(e.Response.URL, w.needle) {
+		if e.Response == nil {
+			return
+		}
+		match, mappingShaped := conversationDetailURL(e.Response.URL, w.cid)
+		if !match {
 			return
 		}
 		w.mu.Lock()
@@ -348,6 +384,7 @@ func (w *convWatcher) handle(ev any) {
 		w.hasResp = true
 		w.status = int(e.Response.Status)
 		w.headers = mergeHeaders(headerMap(e.Response.RequestHeaders), r.headers)
+		w.mappingShaped = mappingShaped
 		w.respOnce.Do(func() { close(w.respCh) })
 
 	case *network.EventLoadingFinished:
@@ -366,24 +403,33 @@ func (w *convWatcher) handle(ev any) {
 	}
 }
 
-// result returns what the response event carried.
-func (w *convWatcher) result() (network.RequestID, int, map[string]string) {
+// result returns what the response event carried, including whether the
+// matched response was the mapping-shaped /backend-api/conversation/<cid>
+// endpoint (as opposed to the paginated plural /backend-api/conversations/<cid>).
+func (w *convWatcher) result() (network.RequestID, int, map[string]string, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.matched, w.status, w.headers
+	return w.matched, w.status, w.headers, w.mappingShaped
 }
 
 // CaptureConversation navigates to a chat and captures the conversation JSON
 // the page fetched for itself, plus the auth headers it used. Port of
 // capture_conversation (export_chats.py:668-679).
 //
+// The watcher matches BOTH spellings ChatGPT's frontend has used for this
+// request: the mapping-shaped /backend-api/conversation/<cid> and the newer
+// paginated /backend-api/conversations/<cid>, which this exporter cannot read
+// (see conversationDetailURL). Whichever answers first still wins, exactly as
+// before; if it is the plural endpoint, the mapping-shaped one is re-fetched
+// in-page with the auth headers just captured, rather than trying to parse a
+// body this code was never taught to read.
+//
 // Returns (nil, nil, status, nil) when the backend answered with anything
 // other than 200, exactly like the Python, so the caller can apply its
 // rate-limit handling. A missing response within NavTimeout is reported as
 // ErrCaptureTimeout.
 func CaptureConversation(s *Session, urlstr, cid string) (map[string]any, map[string]string, int, error) {
-	needle := "/backend-api/conversation/" + cid
-	w := newConvWatcher(needle)
+	w := newConvWatcher(cid)
 	lctx, lcancel := context.WithCancel(s.ctx)
 	defer lcancel()
 	chromedp.ListenTarget(lctx, w.handle)
@@ -412,13 +458,22 @@ wait:
 		}
 	}
 
-	reqID, status, reqHeaders := w.result()
+	reqID, status, reqHeaders, mappingShaped := w.result()
 	auth := AuthHeaders(reqHeaders)
 	if status != 200 {
 		return nil, nil, status, nil
 	}
 
-	body, status, err := conversationBody(s, w, reqID, cid, auth, timer)
+	var body []byte
+	var err error
+	if mappingShaped {
+		body, status, err = conversationBody(s, w, reqID, cid, auth, timer)
+	} else {
+		// The plural endpoint won the race; its body is a paginated
+		// {messages, page_info} list this exporter cannot read, so skip it
+		// entirely and go straight to the mapping-shaped endpoint.
+		body, status, err = refetchConversation(s, cid, auth)
+	}
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -429,6 +484,13 @@ wait:
 	var data map[string]any
 	if err := json.Unmarshal(body, &data); err != nil {
 		return nil, nil, 0, fmt.Errorf("browser: conversation %s returned unparseable JSON: %w", cid, err)
+	}
+	if _, ok := data["mapping"]; !ok {
+		// A shape change here must fail loudly rather than silently: without
+		// this guard, the caller's downstream code (which walks "mapping")
+		// would just see no messages and produce an empty export.
+		return nil, nil, 0, fmt.Errorf(
+			"browser: conversation %s: the conversation endpoint returned an unexpected shape (no mapping of messages)", cid)
 	}
 	return data, auth, 200, nil
 }
@@ -466,9 +528,21 @@ func conversationBody(s *Session, w *convWatcher, reqID network.RequestID, cid s
 		return nil, 0, s.ctx.Err()
 	}
 
-	// Bound the re-fetch: this path is reached only after a wait already
-	// failed, so a stalled in-page fetch must not hang the export until Ctrl+C
-	// (reported by Copilot). NavTimeout matches the main capture wait.
+	return refetchConversation(s, cid, auth)
+}
+
+// refetchConversation re-fetches the mapping-shaped /backend-api/conversation/<cid>
+// endpoint in-page with the given auth headers. It is used both as
+// conversationBody's fallback when the captured body is unavailable, and by
+// CaptureConversation when the watcher matched the plural
+// /backend-api/conversations/<cid> endpoint instead, whose body this exporter
+// cannot read.
+//
+// Bound the re-fetch: this is reached only after the original capture already
+// missed the body it wanted, so a stalled in-page fetch must not hang the
+// export until Ctrl+C (reported by Copilot). NavTimeout matches the main
+// capture wait.
+func refetchConversation(s *Session, cid string, auth map[string]string) ([]byte, int, error) {
 	fetchCtx, cancel := context.WithTimeout(s.ctx, NavTimeout)
 	defer cancel()
 	status, body, err := fetchWithSessionCtx(fetchCtx, BaseURL+"/backend-api/conversation/"+cid, auth)
