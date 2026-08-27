@@ -280,6 +280,22 @@ func Export(ctx context.Context, b Browser, cfg Config) (Summary, error) {
 		// when rlHits > 0 — in that case captureWithRetry has already applied
 		// one of the multi-minute RateLimitBackoffs, so the observed hits are
 		// drained without adding a second cooldown on top.
+		//
+		// Two known imprecisions, both accepted because they can only make the
+		// run more cautious, never wrong (Copilot review):
+		//   * a 429 that browser.APIGet already answered with its own 60s wait
+		//     (file downloads, the Library sweep, discovery) is counted here
+		//     too, so it can buy a second cooldown. Suppressing that would need
+		//     an acknowledge path from APIGet — which takes a Fetcher, not a
+		//     *Session* — back into the counter, and the CDP response event can
+		//     land after the ack, trading a small deterministic over-slowdown
+		//     for a racy one. Both waits are logged, so it is visible if it
+		//     happens.
+		//   * hits arriving during this chat's downloads are drained on the
+		//     NEXT chat, and hits from the last chat's downloads or the closing
+		//     sweep are never drained at all. Draining later would pause AFTER
+		//     the download burst instead of before it, which is worse for the
+		//     server; leftover hits die with the session.
 		hits := rlHits
 		if soft := b.TakeThrottleHits(); rlHits == 0 && soft > 0 {
 			hits = soft
